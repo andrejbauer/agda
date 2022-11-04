@@ -150,7 +150,7 @@ giveExpr force mii mi e = do
       reportSDoc "interaction.give" 40 $ "give: checked expression:" TP.<+> pure (pretty v)
       case mvInstantiation mv of
 
-        InstV{} -> unlessM ((Irrelevant ==) <$> asksTC getRelevance) $ do
+        InstV{} -> unlessM ((Irrelevant ==) <$> viewTC eRelevance) $ do
           v' <- instantiate $ MetaV mi $ map Apply ctx
           reportSDoc "interaction.give" 20 $ TP.sep
             [ "meta was already set to value v' = " TP.<+> prettyTCM v'
