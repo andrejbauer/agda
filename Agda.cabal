@@ -854,7 +854,6 @@ library
     ghc-options: -fprint-potential-instances
                  -- Initially, we disable all the warnings.
                  -w
-                 -Werror
                  -- This option must be the first one after disabling the
                  -- warnings. See Issue #2094.
                  -Wunrecognised-warning-flags
@@ -890,8 +889,6 @@ library
                  -Wwrong-do-bind
   else
     ghc-options: -fprint-potential-instances
-                 -- ASR (2022-05-31). Workaround to Issue #5932.
-                 -Werror
                  -Werror=unrecognised-warning-flags
                  -Werror=deprecated-flags
                  -Werror=deriving-typeable
