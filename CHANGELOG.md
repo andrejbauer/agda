@@ -121,9 +121,13 @@ Interaction and emacs mode
   (`-d`) or refining (`-r`).
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 Backends
 =======
 * Agsy ([automatic proof search](https://agda.readthedocs.io/en/v2.6.2.2.20221106/tools/auto.html)) can
+=======
+* Agsy ([automatic proof search](https://agda.readthedocs.io/en/latest/tools/auto.html)) can
+>>>>>>> 6ea42a26d (Revert "[ #6055, CHANGELOG ] latest -> 2.6.2.2.20221106.")
   now be invoked in the right-hand-sides of copattern matching clauses.
   ([#5827](https://github.com/agda/agda/pull/5827))
 
