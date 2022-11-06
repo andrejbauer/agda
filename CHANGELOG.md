@@ -120,7 +120,48 @@ Interaction and emacs mode
   The reimplementation does not support case splitting (`-c`), disproving
   (`-d`) or refining (`-r`).
 
+<<<<<<< HEAD
 Backends
+=======
+* Agsy ([automatic proof search](https://agda.readthedocs.io/en/v2.6.2.2.20221106/tools/auto.html)) can
+  now be invoked in the right-hand-sides of copattern matching clauses.
+  ([#5827](https://github.com/agda/agda/pull/5827))
+
+Compiler backends
+-----------------
+
+* [**Breaking**] Both the GHC and JS backends now refuse to compile code that uses
+  `--cubical`.
+
+  Note that support for compiling code that uses `--erased-cubical`
+  has been added to both backends (see above).
+
+* If the GHC backend is invoked when `--interaction` or
+  `--interaction-json` is active (for instance when the Emacs mode is
+  used), then GHC is now invoked from the directory containing the
+  `MAlonzo` directory (see
+  [#6194](https://github.com/agda/agda/issues/6194)).
+
+  Before GHC was invoked from the Agda process's current working
+  directory, and that is still the case if `--interaction` and
+  `--interaction-json` are not used.
+
+DOT backend
+-----------
+
+* The new option `--dependency-graph-include=LIBRARY` can be used to
+  restrict the dependency graph to modules from one or more libraries
+  (see [#5634](https://github.com/agda/agda/issues/5634)).
+
+  Note that the module given on the command line might not be
+  included.
+
+* The generated graphs no longer contain "redundant" edges: if a
+  module is imported both directly and indirectly, then the edge
+  corresponding to the direct import is omitted.
+
+JSON API
+>>>>>>> b9941c5c3 ([ #6055, CHANGELOG ] latest -> 2.6.2.2.20221106.)
 --------
 
 API
