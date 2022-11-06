@@ -8,7 +8,6 @@ packages:
 - 'src/size-solver'
 
 extra-deps:
-- QuickCheck-2.14.2
 - STMonadTrans-0.4.3
 - data-hash-0.2.0.1
 - equivalence-0.3.4

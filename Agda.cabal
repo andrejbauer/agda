@@ -846,8 +846,152 @@ library
       Agda.Utils.CallStack.Base
       Agda.Utils.CallStack.Pretty
 
--- Agda binary
----------------------------------------------------------------------------
+  if flag(optimise-heavily)
+    ghc-options: -fexpose-all-unfoldings
+                 -fspecialise-aggressively
+
+  if impl(ghc <= 8.0.2)
+    ghc-options: -fprint-potential-instances
+                 -- Initially, we disable all the warnings.
+                 -w
+                 -- This option must be the first one after disabling the
+                 -- warnings. See Issue #2094.
+                 -Wunrecognised-warning-flags
+                 -Wdeprecated-flags
+                 -Wderiving-typeable
+                 -Wdodgy-exports
+                 -Wdodgy-foreign-imports
+                 -Wdodgy-imports
+                 -Wduplicate-exports
+                 -Wempty-enumerations
+                 -Widentities
+                 -- #6137: GHC 8.0 has no COMPLETE pragma, so we have to turn off the completeness checker
+                 -- -Wincomplete-patterns
+                 -- -Wincomplete-record-updates
+                 -Winline-rule-shadowing
+                 -Wmissing-fields
+                 -Wmissing-methods
+                 -Wmissing-pattern-synonym-signatures
+                 -Wmissing-signatures
+                 -Wnoncanonical-monad-instances
+                 -Wnoncanonical-monoid-instances
+                 -Woverflowed-literals
+                 -- #6137: GHC 8.0 has no COMPLETE pragma, so we have to turn off the completeness checker
+                 -- -Woverlapping-patterns
+                 -Wsemigroup
+                 -Wtabs
+                 -Wtyped-holes
+                 -Wunrecognised-pragmas
+                 -Wunticked-promoted-constructors
+                 -Wunused-do-bind
+                 -Wunused-foralls
+                 -Wwarnings-deprecations
+                 -Wwrong-do-bind
+  else
+    ghc-options: -fprint-potential-instances
+                 -Werror=unrecognised-warning-flags
+                 -Werror=deprecated-flags
+                 -Werror=deriving-typeable
+                 -Werror=dodgy-exports
+                 -Werror=dodgy-foreign-imports
+                 -Werror=dodgy-imports
+                 -Werror=duplicate-exports
+                 -Werror=empty-enumerations
+                 -Werror=identities
+                 -Werror=inline-rule-shadowing
+                 -Werror=missing-fields
+                 -Werror=missing-methods
+                 -Werror=missing-pattern-synonym-signatures
+                 -Werror=missing-signatures
+                 -Werror=noncanonical-monad-instances
+                 -Werror=noncanonical-monoid-instances
+                 -Werror=overflowed-literals
+                 -Werror=overlapping-patterns
+                 -Werror=semigroup
+                 -Werror=tabs
+                 -Werror=typed-holes
+                 -Werror=unrecognised-pragmas
+                 -Werror=unticked-promoted-constructors
+                 -Werror=unused-do-bind
+                 -Werror=unused-foralls
+                 -Werror=warnings-deprecations
+                 -Werror=wrong-do-bind
+
+  if impl(ghc >= 8.2)
+    ghc-options: -Werror=cpp-undef
+                 -Werror=missing-home-modules
+                 -Werror=simplifiable-class-constraints
+                 -Werror=unbanged-strict-patterns
+
+  if impl(ghc >= 8.6)
+    ghc-options: -Werror=inaccessible-code
+                 -Werror=star-binder
+                 -Werror=star-is-type
+
+  -- The following warning is an error in GHC >= 8.10.
+  if impl(ghc >= 8.6) && impl(ghc < 8.10)
+    ghc-options: -Werror=implicit-kind-vars
+
+  if impl(ghc >= 8.8)
+    ghc-options: -Werror=missed-extra-shared-lib
+
+  if impl(ghc >= 8.10)
+    ghc-options: -Werror=deriving-defaults
+                 -Werror=redundant-record-wildcards
+                 -Werror=unused-packages
+                 -Werror=unused-record-wildcards
+
+  if impl(ghc >= 9.0)
+    ghc-options: -Werror=invalid-haddock
+                 -- #6137: coverage checker works only sufficiently well from GHC 9.0
+                 -Werror=incomplete-patterns
+                 -Werror=incomplete-record-updates
+
+  -- ASR (2022-04-27). This warning was added in GHC 9.0.2, removed
+  -- from 9.2.1 and added back in 9.2.2.
+  if impl(ghc == 9.0.2)
+    ghc-options: -Werror=unicode-bidirectional-format-characters
+
+  if impl(ghc >= 9.2.2)
+    ghc-options: -Werror=redundant-bang-patterns
+                 -Werror=unicode-bidirectional-format-characters
+
+  default-language: Haskell2010
+
+  -- NOTE: If adding or removing default extensions, also change:
+  --         .hlint.yaml
+  -- This should also use the same extensions as the `test-suite` target below.
+  default-extensions: BangPatterns
+                    , ConstraintKinds
+                    --L-T Chen (2019-07-15):
+                    -- Enabling DataKinds only locally makes the compile time
+                    -- slightly shorter, see PR #3920.
+                    --, DataKinds
+                    , DefaultSignatures
+                    , DeriveFoldable
+                    , DeriveFunctor
+                    , DeriveGeneric
+                    , DeriveTraversable
+                    , ExistentialQuantification
+                    , FlexibleContexts
+                    , FlexibleInstances
+                    , FunctionalDependencies
+                    , GeneralizedNewtypeDeriving
+                    , InstanceSigs
+                    , LambdaCase
+                    , MultiParamTypeClasses
+                    , MultiWayIf
+                    , NamedFieldPuns
+                    , OverloadedStrings
+                    , PatternSynonyms
+                    , RankNTypes
+                    , RecordWildCards
+                    , ScopedTypeVariables
+                    , StandaloneDeriving
+                    , TupleSections
+                    , TypeFamilies
+                    , TypeOperators
+                    , TypeSynonymInstances
 
 executable agda
   hs-source-dirs: src/main
