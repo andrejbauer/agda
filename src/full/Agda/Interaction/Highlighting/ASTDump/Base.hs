@@ -25,7 +25,6 @@ import Data.Maybe
 import qualified Data.IntMap as IntMap
 import qualified Data.List   as List
 import Data.List.Split (splitWhen, chunksOf)
-import Data.String (fromString)
 import Data.Text.Lazy (Text)
 import qualified Data.Text.Lazy as T
 
@@ -115,15 +114,8 @@ highlightOnlyCode HighlightAuto TexFileType  = False
 
 -- | Determine the generated file extension
 
-highlightedFileExt :: HtmlHighlight -> FileType -> String
-highlightedFileExt hh ft
-  | not $ highlightOnlyCode hh ft = "html"
-  | otherwise = case ft of
-      AgdaFileType -> "html"
-      MdFileType   -> "md"
-      RstFileType  -> "rst"
-      TexFileType  -> "tex"
-      OrgFileType  -> "org"
+highlightedFileExt :: String
+highlightedFileExt = ".agda-ast"
 
 -- | Options for HTML generation
 
@@ -188,7 +180,7 @@ defaultPageGen opts srcFile@(HtmlInputSourceFile moduleName ft _ _) = do
   logHtml $ render $ "Generating AST for"  <+> pretty moduleName <+> ((parens (pretty target)) <> ".")
   writeRenderedHtml html target
   where
-    ext = highlightedFileExt (htmlOptHighlight opts) ft
+    ext = highlightedFileExt
     target = (htmlOptDir opts) </> modToFile moduleName ext
     html = renderSourceFile opts srcFile
 
