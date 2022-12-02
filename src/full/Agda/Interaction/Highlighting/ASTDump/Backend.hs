@@ -74,7 +74,7 @@ astDumpBackend' = Backend'
   , postCompile           = postCompileHtml
   -- --only-scope-checking works, but with the caveat that cross-module links
   -- will not have their definition site populated.
-  , scopeCheckingSuffices = True
+  , scopeCheckingSuffices = False
   , mayEraseType          = const $ return False
   }
 
