@@ -41,7 +41,6 @@ data HtmlFlags = HtmlFlags
   , htmlFlagDir                  :: FilePath
   , htmlFlagHighlight            :: HtmlHighlight
   , htmlFlagHighlightOccurrences :: Bool
-  , htmlFlagCssFile              :: Maybe FilePath
   } deriving (Eq, Generic)
 
 instance NFData HtmlFlags
@@ -87,7 +86,6 @@ initialHtmlFlags = HtmlFlags
   -- Don't enable by default because it causes potential
   -- performance problems
   , htmlFlagHighlightOccurrences = False
-  , htmlFlagCssFile              = Nothing
   }
 
 htmlOptsOfFlags :: HtmlFlags -> HtmlOptions
@@ -95,7 +93,6 @@ htmlOptsOfFlags flags = HtmlOptions
   { htmlOptDir = htmlFlagDir flags
   , htmlOptHighlight = htmlFlagHighlight flags
   , htmlOptHighlightOccurrences = htmlFlagHighlightOccurrences flags
-  , htmlOptCssFile = htmlFlagCssFile flags
   }
 
 -- | The default output directory for HTML.
@@ -117,9 +114,6 @@ htmlFlag o = return $ o { htmlFlagEnabled = True }
 
 htmlDirFlag :: FilePath -> Flag HtmlFlags
 htmlDirFlag d o = return $ o { htmlFlagDir = d }
-
-cssFlag :: FilePath -> Flag HtmlFlags
-cssFlag f o = return $ o { htmlFlagCssFile = Just f }
 
 highlightOccurrencesFlag :: Flag HtmlFlags
 highlightOccurrencesFlag o = return $ o { htmlFlagHighlightOccurrences = True }

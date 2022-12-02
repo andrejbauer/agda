@@ -71,11 +71,6 @@ import Agda.Utils.Impossible
 htmlDataDir :: FilePath
 htmlDataDir = "html"
 
--- | The name of the default CSS file.
-
-defaultCSSFile :: FilePath
-defaultCSSFile = "Agda.css"
-
 -- | The name of the occurrence-highlighting JS file.
 
 occurrenceHighlightJsFile :: FilePath
@@ -123,7 +118,6 @@ data HtmlOptions = HtmlOptions
   { htmlOptDir                  :: FilePath
   , htmlOptHighlight            :: HtmlHighlight
   , htmlOptHighlightOccurrences :: Bool
-  , htmlOptCssFile              :: Maybe FilePath
   } deriving Eq
 
 -- | Internal type bundling the information related to a module source file
@@ -165,11 +159,10 @@ runLogHtmlWith = flip runReaderT
 renderSourceFile :: HtmlOptions -> HtmlInputSourceFile -> Text
 renderSourceFile opts = renderSourcePage
   where
-  cssFile = fromMaybe defaultCSSFile (htmlOptCssFile opts)
   highlightOccur = htmlOptHighlightOccurrences opts
   htmlHighlight = htmlOptHighlight opts
   renderSourcePage (HtmlInputSourceFile moduleName fileType sourceCode hinfo) =
-    page cssFile highlightOccur onlyCode moduleName pageContents
+    page highlightOccur onlyCode moduleName pageContents
     where
       tokens = tokenStream sourceCode hinfo
       onlyCode = highlightOnlyCode htmlHighlight fileType
@@ -189,14 +182,6 @@ prepareCommonDestinationAssets options = liftIO $ do
   -- There is a default directory given by 'defaultHTMLDir'
   let htmlDir = htmlOptDir options
   createDirectoryIfMissing True htmlDir
-
-  -- If the default CSS file should be used, then it is copied to
-  -- the output directory.
-  let cssFile = htmlOptCssFile options
-  when (isNothing $ cssFile) $ do
-    defCssFile <- getDataFileName $
-      htmlDataDir </> defaultCSSFile
-    copyFile defCssFile (htmlDir </> defaultCSSFile)
 
   let highlightOccurrences = htmlOptHighlightOccurrences options
   when highlightOccurrences $ do
@@ -226,13 +211,12 @@ h !! as = h ! mconcat as
 
 -- | Constructs the web page, including headers.
 
-page :: FilePath              -- ^ URL to the CSS file.
-     -> Bool                  -- ^ Highlight occurrences
+page :: Bool                  -- ^ Highlight occurrences
      -> Bool                  -- ^ Whether to reserve literate
      -> TopLevelModuleName    -- ^ Module to be highlighted.
      -> Html
      -> Text
-page css
+page
      highlightOccurrences
      htmlHighlight
      modName
@@ -245,9 +229,6 @@ page css
     hdr = Html5.head $ mconcat
       [ Html5.meta !! [ Attr.charset "utf-8" ]
       , Html5.title (toHtml . render $ pretty modName)
-      , Html5.link !! [ Attr.rel "stylesheet"
-                      , Attr.href $ stringValue css
-                      ]
       , if highlightOccurrences
         then Html5.script mempty !!
           [ Attr.type_ "text/javascript"
