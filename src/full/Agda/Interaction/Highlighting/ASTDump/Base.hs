@@ -59,6 +59,7 @@ import Agda.Syntax.TopLevelModuleName
 
 import qualified Agda.TypeChecking.Monad as TCM
   ( Interface(..)
+  , Definition
   )
 
 import Agda.Utils.Function
@@ -110,20 +111,24 @@ highlightOnlyCode HighlightAuto TexFileType  = False
 
 -- | Determine the generated file extension
 
-highlightedFileExt :: String
-highlightedFileExt = ".agda-ast"
+highlightedFileExt :: FileType -> String
+highlightedFileExt ft =
+  case ft of
+    AgdaFileType -> "agda-ast"
+    MdFileType   -> "md-ast"
+    RstFileType  -> "rst-ast"
+    TexFileType  -> "tex-ast"
+    OrgFileType  -> "org-ast"
 
--- | Options for HTML generation
+-- | Options for AST dump
 
 data ASTDumpOptions = ASTDumpOptions
   { htmlOptDir                  :: FilePath
-  , htmlOptHighlight            :: HtmlHighlight
-  , htmlOptHighlightOccurrences :: Bool
   } deriving Eq
 
 -- | Internal type bundling the information related to a module source file
 
-data HtmlInputSourceFile = HtmlInputSourceFile
+data SourceFile = SourceFile
   { _srcFileModuleName :: TopLevelModuleName
   , _srcInterface :: TCM.Interface
   }
@@ -131,8 +136,8 @@ data HtmlInputSourceFile = HtmlInputSourceFile
 -- | Bundle up the highlighting info for a source file
 
 srcFileOfInterface ::
-  TopLevelModuleName -> TCM.Interface -> HtmlInputSourceFile
-srcFileOfInterface m i = HtmlInputSourceFile m i
+  TopLevelModuleName -> TCM.Interface -> SourceFile
+srcFileOfInterface m i = SourceFile m i
 
 -- | Logging during HTML generation
 
@@ -152,34 +157,24 @@ instance Monad m => MonadLogHtml (LogHtmlT m) where
 runLogHtmlWith :: Monad m => HtmlLogAction m -> LogHtmlT m a -> m a
 runLogHtmlWith = flip runReaderT
 
-renderSourceFile :: ASTDumpOptions -> HtmlInputSourceFile -> Text
-renderSourceFile opts = renderSourcePage
-  where
-  highlightOccur = htmlOptHighlightOccurrences opts
-  htmlHighlight = htmlOptHighlight opts
-  renderSourcePage (HtmlInputSourceFile moduleName iface) =
-      page moduleName iface
+renderSourceFile :: ASTDumpOptions -> SourceFile -> [TCM.Definition] -> Text
+renderSourceFile opts (SourceFile moduleName iface) defs =
+    page moduleName iface defs
 
-defaultPageGen :: (MonadIO m, MonadLogHtml m) => ASTDumpOptions -> HtmlInputSourceFile -> m ()
-defaultPageGen opts srcFile@(HtmlInputSourceFile moduleName _) = do
+defaultPageGen :: (MonadIO m, MonadLogHtml m) => ASTDumpOptions -> SourceFile -> [TCM.Definition] -> m ()
+defaultPageGen opts srcFile@(SourceFile moduleName iface) defs = do
   logHtml $ render $ "Generating AST for"  <+> pretty moduleName <+> ((parens (pretty target)) <> ".")
-  writeRenderedHtml html target
+  writeRenderedHtml sexs target
   where
-    ext = highlightedFileExt
+    ext = highlightedFileExt (TCM.iFileType iface)
     target = (htmlOptDir opts) </> modToFile moduleName ext
-    html = renderSourceFile opts srcFile
+    sexs = renderSourceFile opts srcFile defs
 
 prepareCommonDestinationAssets :: MonadIO m => ASTDumpOptions -> m ()
 prepareCommonDestinationAssets options = liftIO $ do
   -- There is a default directory given by 'defaultHTMLDir'
   let htmlDir = htmlOptDir options
   createDirectoryIfMissing True htmlDir
-
-  let highlightOccurrences = htmlOptHighlightOccurrences options
-  when highlightOccurrences $ do
-    highlightJsFile <- getDataFileName $
-      htmlDataDir </> occurrenceHighlightJsFile
-    copyFile highlightJsFile (htmlDir </> occurrenceHighlightJsFile)
 
 -- | Converts module names to the corresponding HTML file names.
 
@@ -205,8 +200,10 @@ h !! as = h ! mconcat as
 
 page :: TopLevelModuleName
      -> TCM.Interface
+     -> [TCM.Definition]
      -> Text
-page moduleName i = fromString $ prettyShow i
+page moduleName i defs =
+    fromString $ (show defs)
 
 -- | Position, Contents, Infomation
 
