@@ -1,4 +1,3 @@
-
 -- | Backend for generating highlighted, hyperlinked HTML from Agda sources.
 
 module Agda.Interaction.Highlighting.ASTDump.Backend
@@ -34,7 +33,7 @@ import Agda.TypeChecking.Monad
   , reportS
   )
 
--- | Options for HTML generation
+-- | Options for AST generation
 
 data ASTDumpFlags = ASTDumpFlags
   { astFlagEnabled              :: Bool
@@ -43,37 +42,36 @@ data ASTDumpFlags = ASTDumpFlags
 
 instance NFData ASTDumpFlags
 
-data HtmlCompileEnv = HtmlCompileEnv
-  { htmlCompileEnvOpts :: ASTDumpOptions
-  }
+data ASTDumpEnv = ASTDumpEnv
+  { astDir :: FilePath }
 
-data HtmlModuleEnv = HtmlModuleEnv
-  { htmlModEnvCompileEnv :: HtmlCompileEnv
-  , htmlModEnvName       :: TopLevelModuleName
+data ASTDumpModuleEnv = ASTDumpModuleEnv
+  { moduleName :: TopLevelModuleName
   }
-
-data HtmlModule = HtmlModule
 
 astDumpBackend :: Backend
 astDumpBackend = Backend astDumpBackend'
 
-astDumpBackend' :: Backend' ASTDumpFlags HtmlCompileEnv HtmlModuleEnv HtmlModule Definition
+astDumpBackend' :: Backend' ASTDumpFlags ASTDumpEnv () () Definition
 astDumpBackend' = Backend'
   { backendName           = "AST Dump"
   , backendVersion        = Nothing
   , options               = initialASTDumpFlags
   , commandLineFlags      = astFlags
   , isEnabled             = astFlagEnabled
-  , preCompile            = preCompileHtml
-  , preModule             = preModuleHtml
-  , compileDef            = compileDefHtml
-  , postModule            = postModuleHtml
-  , postCompile           = postCompileHtml
+  , preCompile            = preCompileASTDump
+  , preModule             = preModuleASTDump
+  , compileDef            = compileDefASTDump
+  , postModule            = postModuleASTDump
+  , postCompile           = postCompileASTDump
   -- --only-scope-checking works, but with the caveat that cross-module links
   -- will not have their definition site populated.
   , scopeCheckingSuffices = False
   , mayEraseType          = const $ return False
   }
+
+defaultASTDumpDir :: String
+defaultASTDumpDir = "ast-dump"
 
 initialASTDumpFlags :: ASTDumpFlags
 initialASTDumpFlags = ASTDumpFlags
@@ -81,21 +79,16 @@ initialASTDumpFlags = ASTDumpFlags
   , astFlagDir       = defaultASTDumpDir
   }
 
-htmlOptsOfFlags :: ASTDumpFlags -> ASTDumpOptions
-htmlOptsOfFlags flags = ASTDumpOptions
-  { htmlOptDir = astFlagDir flags
+astOptsOfFlags :: ASTDumpFlags -> ASTDumpOptions
+astOptsOfFlags flags = ASTDumpOptions
+  { astOptDir = astFlagDir flags
   }
-
--- | The default output directory for HTML.
-
-defaultASTDumpDir :: FilePath
-defaultASTDumpDir = "ast-dump"
 
 astFlags :: [OptDescr (Flag ASTDumpFlags)]
 astFlags =
     [ Option []     ["ast-dump"] (NoArg astFlag)
                     "generate AST files"
-    , Option []     ["ast-dir"] (ReqArg htmlDirFlag "DIR")
+    , Option []     ["ast-dir"] (ReqArg astDirFlag "DIR")
                     ("directory in which AST files are placed (default: " ++
                      defaultASTDumpDir ++ ")")
     ]
@@ -103,61 +96,55 @@ astFlags =
 astFlag :: Flag ASTDumpFlags
 astFlag o = return $ o { astFlagEnabled = True }
 
-htmlDirFlag :: FilePath -> Flag ASTDumpFlags
-htmlDirFlag d o = return $ o { astFlagDir = d }
+astDirFlag :: FilePath -> Flag ASTDumpFlags
+astDirFlag d o = return $ o { astFlagDir = d }
 
-runLogHtmlWithMonadDebug :: MonadDebug m => LogHtmlT m a -> m a
-runLogHtmlWithMonadDebug = runLogHtmlWith $ reportS "html" 1
+runLogASTDumpWithMonadDebug :: MonadDebug m => LogASTDumpT m a -> m a
+runLogASTDumpWithMonadDebug = runLogASTDumpWith $ reportS "ast-dump" 1
 
-preCompileHtml
+preCompileASTDump
   :: (MonadIO m, MonadDebug m)
   => ASTDumpFlags
-  -> m HtmlCompileEnv
-preCompileHtml flags = runLogHtmlWithMonadDebug $ do
-  logHtml $ unlines
-    [ "Warning: HTML is currently generated for ALL files which can be"
-    , "reached from the given module, including library files."
-    ]
-  let opts = htmlOptsOfFlags flags
-  prepareCommonDestinationAssets opts
-  return $ HtmlCompileEnv opts
+  -> m ASTDumpEnv
+preCompileASTDump flags = runLogASTDumpWithMonadDebug $ do
+  return (ASTDumpEnv $ astFlagDir flags)
 
-preModuleHtml
+preModuleASTDump
   :: Applicative m
-  => HtmlCompileEnv
+  => ASTDumpEnv
   -> IsMain
   -> TopLevelModuleName
   -> Maybe FilePath
-  -> m (Recompile HtmlModuleEnv HtmlModule)
-preModuleHtml cenv _isMain modName _ifacePath = pure $ Recompile (HtmlModuleEnv cenv modName)
+  -> m (Recompile () ())
+preModuleASTDump _env _isMain _modName _ifacePath = pure $ Recompile ()
 
-compileDefHtml
+compileDefASTDump
   :: Applicative m
-  => HtmlCompileEnv
-  -> HtmlModuleEnv
+  => ASTDumpEnv
+  -> ()
   -> IsMain
   -> Definition
   -> m Definition
-compileDefHtml _env _menv _isMain def = pure def
+compileDefASTDump _env _menv _isMain def = pure def
 
-postModuleHtml
+postModuleASTDump
   :: (MonadIO m, MonadDebug m, ReadTCState m)
-  => HtmlCompileEnv
-  -> HtmlModuleEnv
+  => ASTDumpEnv
+  -> ()
   -> IsMain
   -> TopLevelModuleName
   -> [Definition]
-  -> m HtmlModule
-postModuleHtml _env menv _isMain _modName defs = do
-  let generatePage = defaultPageGen . htmlCompileEnvOpts . htmlModEnvCompileEnv $ menv
-  htmlSrc <- srcFileOfInterface (htmlModEnvName menv) <$> curIF
-  runLogHtmlWithMonadDebug $ generatePage htmlSrc defs
-  return HtmlModule
-
-postCompileHtml
-  :: Applicative m
-  => HtmlCompileEnv
-  -> IsMain
-  -> Map TopLevelModuleName HtmlModule
   -> m ()
-postCompileHtml _cenv _isMain _modulesByName = pure ()
+postModuleASTDump env menv _isMain modName defs = do
+  astSrc <- srcFileOfInterface modName <$> curIF
+  runLogASTDumpWithMonadDebug $ defaultPageGen opts astSrc defs
+    where
+      opts = ASTDumpOptions (astDir env)
+
+postCompileASTDump
+  :: Applicative m
+  => ASTDumpEnv
+  -> IsMain
+  -> Map TopLevelModuleName ()
+  -> m ()
+postCompileASTDump _cenv _isMain _modulesByName = pure ()
