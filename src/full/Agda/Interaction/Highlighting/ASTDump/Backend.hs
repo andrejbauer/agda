@@ -36,14 +36,12 @@ import Agda.TypeChecking.Monad
 
 -- | Options for HTML generation
 
-data HtmlFlags = HtmlFlags
-  { htmlFlagEnabled              :: Bool
-  , htmlFlagDir                  :: FilePath
-  , htmlFlagHighlight            :: HtmlHighlight
-  , htmlFlagHighlightOccurrences :: Bool
+data ASTDumpFlags = ASTDumpFlags
+  { astFlagEnabled              :: Bool
+  , astFlagDir                  :: FilePath
   } deriving (Eq, Generic)
 
-instance NFData HtmlFlags
+instance NFData ASTDumpFlags
 
 data HtmlCompileEnv = HtmlCompileEnv
   { htmlCompileEnvOpts :: ASTDumpOptions
@@ -55,18 +53,17 @@ data HtmlModuleEnv = HtmlModuleEnv
   }
 
 data HtmlModule = HtmlModule
-data HtmlDef = HtmlDef
 
 astDumpBackend :: Backend
 astDumpBackend = Backend astDumpBackend'
 
-astDumpBackend' :: Backend' HtmlFlags HtmlCompileEnv HtmlModuleEnv HtmlModule HtmlDef
+astDumpBackend' :: Backend' ASTDumpFlags HtmlCompileEnv HtmlModuleEnv HtmlModule Definition
 astDumpBackend' = Backend'
   { backendName           = "AST Dump"
   , backendVersion        = Nothing
-  , options               = initialHtmlFlags
-  , commandLineFlags      = htmlFlags
-  , isEnabled             = htmlFlagEnabled
+  , options               = initialASTDumpFlags
+  , commandLineFlags      = astFlags
+  , isEnabled             = astFlagEnabled
   , preCompile            = preCompileHtml
   , preModule             = preModuleHtml
   , compileDef            = compileDefHtml
@@ -78,63 +75,43 @@ astDumpBackend' = Backend'
   , mayEraseType          = const $ return False
   }
 
-initialHtmlFlags :: HtmlFlags
-initialHtmlFlags = HtmlFlags
-  { htmlFlagEnabled   = False
-  , htmlFlagDir       = defaultHTMLDir
-  , htmlFlagHighlight = HighlightAll
-  -- Don't enable by default because it causes potential
-  -- performance problems
-  , htmlFlagHighlightOccurrences = False
+initialASTDumpFlags :: ASTDumpFlags
+initialASTDumpFlags = ASTDumpFlags
+  { astFlagEnabled   = False
+  , astFlagDir       = defaultASTDumpDir
   }
 
-htmlOptsOfFlags :: HtmlFlags -> ASTDumpOptions
+htmlOptsOfFlags :: ASTDumpFlags -> ASTDumpOptions
 htmlOptsOfFlags flags = ASTDumpOptions
-  { htmlOptDir = htmlFlagDir flags
-  , htmlOptHighlight = htmlFlagHighlight flags
-  , htmlOptHighlightOccurrences = htmlFlagHighlightOccurrences flags
+  { htmlOptDir = astFlagDir flags
   }
 
 -- | The default output directory for HTML.
 
-defaultHTMLDir :: FilePath
-defaultHTMLDir = "html"
+defaultASTDumpDir :: FilePath
+defaultASTDumpDir = "ast-dump"
 
-htmlFlags :: [OptDescr (Flag HtmlFlags)]
-htmlFlags =
-    [ Option []     ["ast-dump"] (NoArg htmlFlag)
+astFlags :: [OptDescr (Flag ASTDumpFlags)]
+astFlags =
+    [ Option []     ["ast-dump"] (NoArg astFlag)
                     "generate AST files"
     , Option []     ["ast-dir"] (ReqArg htmlDirFlag "DIR")
                     ("directory in which AST files are placed (default: " ++
-                     defaultHTMLDir ++ ")")
+                     defaultASTDumpDir ++ ")")
     ]
 
-htmlFlag :: Flag HtmlFlags
-htmlFlag o = return $ o { htmlFlagEnabled = True }
+astFlag :: Flag ASTDumpFlags
+astFlag o = return $ o { astFlagEnabled = True }
 
-htmlDirFlag :: FilePath -> Flag HtmlFlags
-htmlDirFlag d o = return $ o { htmlFlagDir = d }
-
-highlightOccurrencesFlag :: Flag HtmlFlags
-highlightOccurrencesFlag o = return $ o { htmlFlagHighlightOccurrences = True }
-
-parseHtmlHighlightFlag :: MonadError String m => String -> m HtmlHighlight
-parseHtmlHighlightFlag "code" = return HighlightCode
-parseHtmlHighlightFlag "all"  = return HighlightAll
-parseHtmlHighlightFlag "auto" = return HighlightAuto
-parseHtmlHighlightFlag opt    = throwError $ concat ["Invalid option <", opt, ">, expected <all>, <auto> or <code>"]
-
-htmlHighlightFlag :: String -> Flag HtmlFlags
-htmlHighlightFlag opt    o = do
-  flag <- parseHtmlHighlightFlag opt
-  return $ o { htmlFlagHighlight = flag }
+htmlDirFlag :: FilePath -> Flag ASTDumpFlags
+htmlDirFlag d o = return $ o { astFlagDir = d }
 
 runLogHtmlWithMonadDebug :: MonadDebug m => LogHtmlT m a -> m a
 runLogHtmlWithMonadDebug = runLogHtmlWith $ reportS "html" 1
 
 preCompileHtml
   :: (MonadIO m, MonadDebug m)
-  => HtmlFlags
+  => ASTDumpFlags
   -> m HtmlCompileEnv
 preCompileHtml flags = runLogHtmlWithMonadDebug $ do
   logHtml $ unlines
@@ -160,8 +137,8 @@ compileDefHtml
   -> HtmlModuleEnv
   -> IsMain
   -> Definition
-  -> m HtmlDef
-compileDefHtml _env _menv _isMain _def = pure HtmlDef
+  -> m Definition
+compileDefHtml _env _menv _isMain def = pure def
 
 postModuleHtml
   :: (MonadIO m, MonadDebug m, ReadTCState m)
@@ -169,12 +146,12 @@ postModuleHtml
   -> HtmlModuleEnv
   -> IsMain
   -> TopLevelModuleName
-  -> [HtmlDef]
+  -> [Definition]
   -> m HtmlModule
-postModuleHtml _env menv _isMain _modName _defs = do
+postModuleHtml _env menv _isMain _modName defs = do
   let generatePage = defaultPageGen . htmlCompileEnvOpts . htmlModEnvCompileEnv $ menv
   htmlSrc <- srcFileOfInterface (htmlModEnvName menv) <$> curIF
-  runLogHtmlWithMonadDebug $ generatePage htmlSrc
+  runLogHtmlWithMonadDebug $ generatePage htmlSrc defs
   return HtmlModule
 
 postCompileHtml
