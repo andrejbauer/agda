@@ -46,7 +46,7 @@ data HtmlFlags = HtmlFlags
 instance NFData HtmlFlags
 
 data HtmlCompileEnv = HtmlCompileEnv
-  { htmlCompileEnvOpts :: HtmlOptions
+  { htmlCompileEnvOpts :: ASTDumpOptions
   }
 
 data HtmlModuleEnv = HtmlModuleEnv
@@ -88,8 +88,8 @@ initialHtmlFlags = HtmlFlags
   , htmlFlagHighlightOccurrences = False
   }
 
-htmlOptsOfFlags :: HtmlFlags -> HtmlOptions
-htmlOptsOfFlags flags = HtmlOptions
+htmlOptsOfFlags :: HtmlFlags -> ASTDumpOptions
+htmlOptsOfFlags flags = ASTDumpOptions
   { htmlOptDir = htmlFlagDir flags
   , htmlOptHighlight = htmlFlagHighlight flags
   , htmlOptHighlightOccurrences = htmlFlagHighlightOccurrences flags

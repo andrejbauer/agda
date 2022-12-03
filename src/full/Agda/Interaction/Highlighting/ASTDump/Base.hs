@@ -2,7 +2,7 @@
 -- | Function for generating highlighted AST
 
 module Agda.Interaction.Highlighting.ASTDump.Base
-  ( HtmlOptions(..)
+  ( ASTDumpOptions(..)
   , HtmlHighlight(..)
   , prepareCommonDestinationAssets
   , srcFileOfInterface
@@ -26,6 +26,7 @@ import qualified Data.IntMap as IntMap
 import qualified Data.List   as List
 import Data.List.Split (splitWhen, chunksOf)
 import Data.Text.Lazy (Text)
+import Data.String (fromString)
 import qualified Data.Text.Lazy as T
 
 import GHC.Generics (Generic)
@@ -114,7 +115,7 @@ highlightedFileExt = ".agda-ast"
 
 -- | Options for HTML generation
 
-data HtmlOptions = HtmlOptions
+data ASTDumpOptions = ASTDumpOptions
   { htmlOptDir                  :: FilePath
   , htmlOptHighlight            :: HtmlHighlight
   , htmlOptHighlightOccurrences :: Bool
@@ -124,19 +125,14 @@ data HtmlOptions = HtmlOptions
 
 data HtmlInputSourceFile = HtmlInputSourceFile
   { _srcFileModuleName :: TopLevelModuleName
-  , _srcFileType :: FileType
-  -- ^ Source file type
-  , _srcFileText :: Text
-  -- ^ Source text
-  , _srcFileHighlightInfo :: HighlightingInfo
-  -- ^ Highlighting info
+  , _srcInterface :: TCM.Interface
   }
 
 -- | Bundle up the highlighting info for a source file
 
 srcFileOfInterface ::
   TopLevelModuleName -> TCM.Interface -> HtmlInputSourceFile
-srcFileOfInterface m i = HtmlInputSourceFile m (TCM.iFileType i) (TCM.iSource i) (TCM.iHighlighting i)
+srcFileOfInterface m i = HtmlInputSourceFile m i
 
 -- | Logging during HTML generation
 
@@ -156,20 +152,16 @@ instance Monad m => MonadLogHtml (LogHtmlT m) where
 runLogHtmlWith :: Monad m => HtmlLogAction m -> LogHtmlT m a -> m a
 runLogHtmlWith = flip runReaderT
 
-renderSourceFile :: HtmlOptions -> HtmlInputSourceFile -> Text
+renderSourceFile :: ASTDumpOptions -> HtmlInputSourceFile -> Text
 renderSourceFile opts = renderSourcePage
   where
   highlightOccur = htmlOptHighlightOccurrences opts
   htmlHighlight = htmlOptHighlight opts
-  renderSourcePage (HtmlInputSourceFile moduleName fileType sourceCode hinfo) =
-    page highlightOccur onlyCode moduleName pageContents
-    where
-      tokens = tokenStream sourceCode hinfo
-      onlyCode = highlightOnlyCode htmlHighlight fileType
-      pageContents = code onlyCode fileType tokens
+  renderSourcePage (HtmlInputSourceFile moduleName iface) =
+      page moduleName iface
 
-defaultPageGen :: (MonadIO m, MonadLogHtml m) => HtmlOptions -> HtmlInputSourceFile -> m ()
-defaultPageGen opts srcFile@(HtmlInputSourceFile moduleName ft _ _) = do
+defaultPageGen :: (MonadIO m, MonadLogHtml m) => ASTDumpOptions -> HtmlInputSourceFile -> m ()
+defaultPageGen opts srcFile@(HtmlInputSourceFile moduleName _) = do
   logHtml $ render $ "Generating AST for"  <+> pretty moduleName <+> ((parens (pretty target)) <> ".")
   writeRenderedHtml html target
   where
@@ -177,7 +169,7 @@ defaultPageGen opts srcFile@(HtmlInputSourceFile moduleName ft _ _) = do
     target = (htmlOptDir opts) </> modToFile moduleName ext
     html = renderSourceFile opts srcFile
 
-prepareCommonDestinationAssets :: MonadIO m => HtmlOptions -> m ()
+prepareCommonDestinationAssets :: MonadIO m => ASTDumpOptions -> m ()
 prepareCommonDestinationAssets options = liftIO $ do
   -- There is a default directory given by 'defaultHTMLDir'
   let htmlDir = htmlOptDir options
@@ -211,33 +203,10 @@ h !! as = h ! mconcat as
 
 -- | Constructs the web page, including headers.
 
-page :: Bool                  -- ^ Highlight occurrences
-     -> Bool                  -- ^ Whether to reserve literate
-     -> TopLevelModuleName    -- ^ Module to be highlighted.
-     -> Html
+page :: TopLevelModuleName
+     -> TCM.Interface
      -> Text
-page
-     highlightOccurrences
-     htmlHighlight
-     modName
-     pageContent =
-  renderHtml $ if htmlHighlight
-               then pageContent
-               else Html5.docTypeHtml $ hdr <> rest
-  where
-
-    hdr = Html5.head $ mconcat
-      [ Html5.meta !! [ Attr.charset "utf-8" ]
-      , Html5.title (toHtml . render $ pretty modName)
-      , if highlightOccurrences
-        then Html5.script mempty !!
-          [ Attr.type_ "text/javascript"
-          , Attr.src $ stringValue occurrenceHighlightJsFile
-          ]
-        else mempty
-      ]
-
-    rest = Html5.body $ (Html5.pre ! Attr.class_ "Agda") pageContent
+page moduleName i = fromString $ prettyShow i
 
 -- | Position, Contents, Infomation
 
