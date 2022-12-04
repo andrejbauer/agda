@@ -39,6 +39,8 @@ import Paths_Agda
 
 import Agda.Syntax.TopLevelModuleName
 
+import Agda.Syntax.Literal (Literal(..))
+
 import Agda.Syntax.Common
 import Agda.Syntax.Abstract as AS
 import Agda.Syntax.Internal as AI
@@ -138,67 +140,48 @@ instance Sexpable ModuleName where
     toSexp (MName lst) = constr "mname" $ map toSexp lst
 
 instance Sexpable QName where
-    toSexp (QName (MName lst) nam) = constr "qname" $ (map toSexp lst ++ [toSexp nam])
+    toSexp (QName (MName lst) nam) = constr "name" $ (map toSexp lst ++ [toSexp nam])
 
 instance Sexpable Suffix where
     toSexp NoSuffix = Atom "none"
     toSexp (Suffix k) = Integer k
 
--- instance Sexpable AS.Expr where
---     toSexp (AS.Var x) = constr "bound" [toSexp x]
---     toSexp (AS.Def' n s) = constr "const" [toSexp n, toSexp s]
---     toSexp (AS.Proj _ _) = Atom "<projection>"
---     toSexp (AS.Con _) = Atom "<overloaded-constructor>"
---     toSexp (AS.PatternSyn s) = Atom "<pattern-synonym>"
---     toSexp (AS.Macro q) = constr "macro" [toSexp q]
---     toSexp (AS.Lit _ _) = Atom "<literal>"
---     toSexp (AS.QuestionMark _ _) = Atom "<?>"
---     toSexp (AS.Underscore _) = Atom "<_>"
---     toSexp (AS.Dot _ _) = Atom "<dot>"
---     toSexp (AS.App _ _ _) = Atom "<app>"
---     toSexp (AS.WithApp _ _ _) = Atom "<with-app>"
---     toSexp (AS.Lam _ _ _) = Atom "<lambda>"
---     toSexp (AS.AbsurdLam _ _) = Atom "<absurd-lambda>"
---     toSexp (AS.ExtendedLam _ _ _ _ _) = Atom "<extended-lambda>"
---     toSexp (AS.Pi _ _ _) = Atom "<pi>"
---     toSexp (AS.Generalized _ _) = Atom "<generalized>"
---     toSexp (AS.Fun _ _ _) = Atom "<fun>"
---     toSexp (AS.Let _ _ _) = Atom "<let>"
---     toSexp (AS.Rec _ _) = Atom "<record>"
---     toSexp (AS.RecUpdate _ _ _) = Atom "<record-update>"
---     toSexp (AS.ScopedExpr _ _) = Atom "<scoped-expr>"
---     toSexp (AS.Quote _) = Atom "<quote-qname>"
---     toSexp (AS.QuoteTerm _) = Atom "<quote-term>"
---     toSexp (AS.Unquote _) = Atom "<unquote-qname>"
---     toSexp (AS.DontCare _) = Atom "<dont-care>"
-
-instance Sexpable ArgInfo where
-    toSexp _ = Atom "<arginfo>"
-
-instance Sexpable a => Sexpable (Arg a) where
-    toSexp (Arg info e) = constr "arg" [toSexp e]
-
 instance Sexpable a => Sexpable (EL.Elim' a) where
-    toSexp (EL.Apply a) = toSexp a
-    toSexp (EL.Proj _ q) = toSexp q
-    toSexp (EL.IApply _ _ _) = Atom "<iapply>"
+    toSexp (EL.Apply (Arg _ e)) = constr "arg" [toSexp e]
+    toSexp (EL.Proj _ q) = constr "proj" [toSexp q]
+    toSexp (EL.IApply x y r) = constr "interval-arg" [toSexp x, toSexp y, toSexp r]
 
-instance Sexpable a => Sexpable (AI.Abs a) where
-    toSexp (AI.Abs n e) = constr "abs" [toSexp n, toSexp e]
-    toSexp (NoAbs n e) = constr "noabs" [toSexp n, toSexp e]
+-- instance Sexpable a => Sexpable (AI.Abs a) where
+--     toSexp (AI.Abs n e) = constr "abs" [toSexp n, toSexp e]
+--     toSexp (NoAbs n e) = constr "noabs" [toSexp n, toSexp e]
+
+instance Sexpable t => Sexpable (AI.Dom t) where
+    toSexp (AI.Dom _ _ _ _ t) = toSexp t
+
+instance Sexpable Literal where
+    toSexp (LitNat k) = toSexp k
+    toSexp (LitWord64 w) = toSexp w
+    toSexp (LitFloat x) = toSexp x
+    toSexp (LitString s) = toSexp $ show s
+    toSexp (LitChar c) = toSexp [c]
+    toSexp (LitQName q) = toSexp q
+    toSexp (LitMeta mdl (MetaId u (ModuleNameHash v))) = constr "meta" [toSexp mdl, toSexp u, toSexp v]
 
 instance Sexpable AI.Term where
     toSexp (AI.Var k es) = constr "var" (Integer (toInteger k) : map toSexp es)
-    toSexp (AI.Lam args abs) = constr "lam" [toSexp args, toSexp abs]
-    toSexp (AI.Lit lit) = Atom "<literal>"
-    toSexp (AI.Def qname es) = Atom "<delta-iota-redex>"
-    toSexp (AI.Con hd inf es) = Atom "<con>"
-    toSexp (AI.Pi dom cod) = constr "pi" [toSexp dom, toSexp cod]
-    toSexp (AI.Sort s) = Atom "<sort>"
-    toSexp (AI.Level lvl) = Atom "<level>"
+    toSexp (AI.Lam _ (AI.Abs x e)) = constr "lambda" [String x, toSexp e]
+    toSexp (AI.Lam _ (AI.NoAbs x e)) = constr "lambda" [String x, toSexp e]
+    toSexp (AI.Lit lit) = constr "literal" [toSexp lit]
+    toSexp (AI.Def q es) = constr "apply" [toSexp q, Cons $ map toSexp es]
+    toSexp (AI.Con (AI.ConHead q _ _ _) _ es) = constr "constr" (toSexp q : map toSexp es)
+    toSexp (AI.Pi (AI.Dom _ _ _ _ t) (AI.Abs x e)) = constr "pi" [String x, toSexp t, toSexp e]
+    toSexp (AI.Pi (AI.Dom _ _ _ _ t) (AI.NoAbs x e)) = constr "pi" [String x, toSexp t, toSexp e]
+    toSexp (AI.Sort s) = constr "sort" [toSexp s]
+    toSexp (AI.Level lvl) = constr "level" [toSexp lvl]
     toSexp (AI.MetaV mid es) = Atom "<meta>"
     toSexp (AI.DontCare e) = Atom "<dont-care>"
     toSexp (AI.Dummy s es) = Atom "<dummy>"
+
 
 instance Sexpable AI.Type where
     toSexp (AI.El srt typ) = constr "type" [toSexp srt, toSexp typ]
@@ -226,9 +209,8 @@ instance Sexpable t => Sexpable (AI.Sort' t) where
 
 instance Sexpable TCM.Definition where
     toSexp d = constr "definition" [ toSexp (TCM.defName d),
-                                      toSexp (TCM.defArgInfo d),
-                                      toSexp (TCM.defType d),
-                                      toSexp (TCM.theDef d)
+                                     toSexp (TCM.defType d),
+                                     toSexp (TCM.theDef d)
                                     ]
 
 instance Sexpable TCM.Defn where
@@ -255,9 +237,6 @@ instance Sexpable AI.Telescope where
         where process AI.EmptyTel = []
               process (AI.ExtendTel t (Abs n tel)) = (constr "arg" [toSexp n, toSexp t]) : process tel
               process (AI.ExtendTel t (NoAbs n tel)) = [constr "internal-error" []]
-
-instance Sexpable t => Sexpable (AI.Dom t) where
-    toSexp (AI.Dom _ _ _ _ t) = toSexp t
 
 instance Sexpable TopLevelModuleName where
     toSexp (TopLevelModuleName rng (ModuleNameHash id) ps) = constr "hash" [toSexp id]

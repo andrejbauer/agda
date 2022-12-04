@@ -6,7 +6,7 @@ import Data.Word
 import Data.Text.Lazy (Text)
 import qualified Data.Text.Lazy as T
 
-data Sexp = Atom Text | String String | Integer Integer | Cons [Sexp]
+data Sexp = Atom Text | String String | Integer Integer | Double Double | Cons [Sexp]
 
 constr :: String -> [Sexp] -> Sexp
 constr head lst = Cons (Atom (':' `T.cons` (T.pack head)) : lst)
@@ -14,7 +14,8 @@ constr head lst = Cons (Atom (':' `T.cons` (T.pack head)) : lst)
 toText :: Sexp -> T.Text
 toText (Atom x)   = x
 toText (Integer k) = T.pack $ show k
-toText (String s) = T.pack s
+toText (Double x) = T.pack $ show x
+toText (String s) = '"' `T.cons` T.pack s `T.snoc` '"'
 toText (Cons lst) = '(' `T.cons` (T.intercalate (T.singleton ' ') (map toText lst)) `T.snoc` ')'
 
 class Sexpable a where
@@ -29,6 +30,9 @@ instance Sexpable Integer where
 
 instance Sexpable String where
     toSexp = String
+
+instance Sexpable Double where
+    toSexp = Double
 
 instance Sexpable Word64 where
     toSexp w = Integer (toInteger w)
