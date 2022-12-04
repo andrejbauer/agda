@@ -12,6 +12,9 @@ import Control.Monad.Except ( MonadError(throwError) )
 
 import Data.Map (Map)
 
+import Data.Text.Lazy (Text)
+import qualified Data.Text.Lazy as T
+
 import GHC.Generics (Generic)
 
 import Agda.Interaction.Options
@@ -30,6 +33,7 @@ import Agda.TypeChecking.Monad
   , Definition
   , reportS
   )
+
 
 -- | Command-line options for AST generation
 

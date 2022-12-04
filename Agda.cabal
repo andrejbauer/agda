@@ -648,6 +648,7 @@ library
                     Agda.Interaction.Highlighting.HTML.Base
                     Agda.Interaction.Highlighting.SexpDump.Backend
                     Agda.Interaction.Highlighting.SexpDump.Base
+                    Agda.Interaction.Highlighting.SexpDump.Sexp
                     Agda.Interaction.Highlighting.LaTeX.Backend
                     Agda.Interaction.Highlighting.LaTeX.Base
                     Agda.Interaction.Options.Base
