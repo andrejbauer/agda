@@ -10,7 +10,8 @@ module Agda.Interaction.Highlighting.SexpDump.Base
   , runLogSexpDumpWith
   ) where
 
-import Prelude hiding ((!!), concatMap)
+import Agda.Interaction.Highlighting.SexpDump.Sexp
+
 
 import Control.DeepSeq
 import Control.Monad
@@ -39,9 +40,11 @@ import Paths_Agda
 import Agda.Syntax.Common
 import Agda.Syntax.TopLevelModuleName
 
+import Agda.Syntax.Abstract.Name (QName)
+
 import qualified Agda.TypeChecking.Monad as TCM
   ( Interface(..)
-  , Definition
+  , Definition(..)
   )
 
 import Agda.Utils.Function
@@ -98,7 +101,7 @@ runLogSexpDumpWith = flip runReaderT
 
 renderSourceFile :: TopLevelModuleName -> TCM.Interface -> [TCM.Definition] -> Text
 renderSourceFile _moduleName iface defs =
-    fromString $ (show defs)
+    toText $ toSexp defs
 
 defaultPageGen :: (MonadIO m, MonadLogSexpDump m) => SexpDumpOptions -> SourceFile -> [TCM.Definition] -> m ()
 defaultPageGen opts (SourceFile moduleName iface) defs = do
@@ -113,3 +116,11 @@ defaultPageGen opts (SourceFile moduleName iface) defs = do
 
 modToFile :: TopLevelModuleName -> String -> FilePath
 modToFile m ext = Network.URI.Encode.encode $ render (pretty m) <.> ext
+
+-- | Conversion to S-expressions
+
+instance Sexpable QName where
+    toSexp n = Atom (T.pack (show n))
+
+instance Sexpable TCM.Definition where
+    toSexp d = Cons [toSexp $ TCM.defName d]
