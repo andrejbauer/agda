@@ -1,10 +1,11 @@
 
--- | Function for generating highlighted AST
+-- | Function for generating internal abstract syntax trees as s-expressions
 
 module Agda.Interaction.Highlighting.Sexp.Base
   ( SexpOptions(..)
   , srcFileOfInterface
-  , defaultPageGen
+  , defaultSexpGen
+  , prepareOutputDirectory
   , MonadLogSexp(logSexp)
   , LogSexpT
   , runLogSexpWith
@@ -53,13 +54,7 @@ import Agda.Syntax.Abstract.Name
     Suffix(..)
   )
 
-import qualified Agda.TypeChecking.Monad as TCM
-  ( Interface(..)
-  , Definition(..)
-  , Defn(..)
-  , FunctionData(..)
-  , funClauses
-  )
+import Agda.TypeChecking.Monad as TCM
 
 import Agda.Utils.Function
 import qualified Agda.Utils.IO.UTF8 as UTF8
@@ -70,16 +65,16 @@ import Agda.Utils.Impossible
 dumpFileExt :: FileType -> String
 dumpFileExt ft =
   case ft of
-    AgdaFileType -> "agda-ast"
-    MdFileType   -> "md-ast"
-    RstFileType  -> "rst-ast"
-    TexFileType  -> "tex-ast"
-    OrgFileType  -> "org-ast"
+    AgdaFileType -> "agda-sexp"
+    MdFileType   -> "md-sexp"
+    RstFileType  -> "rst-sexp"
+    TexFileType  -> "tex-sexp"
+    OrgFileType  -> "org-sexp"
 
 -- | Options for AST dump
 
 data SexpOptions = SexpOptions
-  { astOptDir                  :: FilePath
+  { sexpOptDir                  :: FilePath
   } deriving Eq
 
 -- | Internal type bundling the information related to a module source file
@@ -117,14 +112,19 @@ renderSourceFile :: TopLevelModuleName -> TCM.Interface -> [TCM.Definition] -> T
 renderSourceFile moduleName iface defs =
     toText $ constr "module" (toSexp moduleName : map toSexp defs)
 
-defaultPageGen :: (MonadIO m, MonadLogSexp m) => SexpOptions -> SourceFile -> [TCM.Definition] -> m ()
-defaultPageGen opts (SourceFile moduleName iface) defs = do
+defaultSexpGen :: (MonadIO m, MonadLogSexp m) => SexpOptions -> SourceFile -> [TCM.Definition] -> m ()
+defaultSexpGen opts (SourceFile moduleName iface) defs = do
   logSexp $ render $ "Generating AST for"  <+> pretty moduleName <+> ((parens (pretty target)) <> ".")
   liftIO $ UTF8.writeTextToFile target sexps
   where
     ext = dumpFileExt (TCM.iFileType iface)
-    target = (astOptDir opts) </> modToFile moduleName ext
+    target = (sexpOptDir opts) </> modToFile moduleName ext
     sexps = renderSourceFile moduleName iface defs
+
+prepareOutputDirectory :: MonadIO m => FilePath -> m ()
+prepareOutputDirectory sexpDir = liftIO $ do createDirectoryIfMissing True sexpDir
+
+
 
 -- | Converts module names to the corresponding AST file names.
 
@@ -158,6 +158,9 @@ instance Sexpable a => Sexpable (EL.Elim' a) where
 instance Sexpable t => Sexpable (AI.Dom t) where
     toSexp (AI.Dom _ _ _ _ t) = toSexp t
 
+instance Sexpable MetaId where
+    toSexp (MetaId u (ModuleNameHash v)) = Cons [toSexp u, toSexp v]
+
 instance Sexpable Literal where
     toSexp (LitNat k) = toSexp k
     toSexp (LitWord64 w) = toSexp w
@@ -165,7 +168,7 @@ instance Sexpable Literal where
     toSexp (LitString s) = toSexp $ show s
     toSexp (LitChar c) = toSexp [c]
     toSexp (LitQName q) = toSexp q
-    toSexp (LitMeta mdl (MetaId u (ModuleNameHash v))) = constr "meta" [toSexp mdl, toSexp u, toSexp v]
+    toSexp (LitMeta mdl mid) = constr "meta" [toSexp mdl, toSexp mid]
 
 instance Sexpable AI.Term where
     toSexp (AI.Var k es) = constr "var" (Integer (toInteger k) : map toSexp es)
@@ -178,10 +181,9 @@ instance Sexpable AI.Term where
     toSexp (AI.Pi (AI.Dom _ _ _ _ t) (AI.NoAbs x e)) = constr "pi" [String x, toSexp t, toSexp e]
     toSexp (AI.Sort s) = constr "sort" [toSexp s]
     toSexp (AI.Level lvl) = constr "level" [toSexp lvl]
-    toSexp (AI.MetaV mid es) = Atom "<meta>"
-    toSexp (AI.DontCare e) = Atom "<dont-care>"
-    toSexp (AI.Dummy s es) = Atom "<dummy>"
-
+    toSexp (AI.MetaV mid es) = constr "meta" (toSexp mid : map toSexp es)
+    toSexp (AI.DontCare e) = constr "irrelevant" [toSexp e]
+    toSexp (AI.Dummy s es) = constr "internal" (toSexp s : map toSexp es)
 
 instance Sexpable AI.Type where
     toSexp (AI.El srt typ) = constr "type" [toSexp srt, toSexp typ]
@@ -192,38 +194,38 @@ instance Sexpable t => Sexpable (AI.Level' t) where
 instance Sexpable t => Sexpable (AI.PlusLevel' t) where
     toSexp (AI.Plus k t) = constr "plus" [toSexp k, toSexp t]
 
-instance Sexpable t => Sexpable (AI.Sort' t) where
-    toSexp (AI.Type lvl) = constr "set" [toSexp lvl]
-    toSexp (AI.Prop lvl) = constr "prop" [toSexp lvl]
-    toSexp (AI.Inf _ k) = constr "setω" [toSexp k]
-    toSexp (AI.SSet lvl) = constr "sset" [toSexp lvl]
-    toSexp AI.SizeUniv = Atom ":sizeuniv"
-    toSexp AI.LockUniv = Atom ":lockuniv"
-    toSexp AI.IntervalUniv = Atom ":interval"
-    toSexp (AI.PiSort dom srt cod) = Atom "<pi-sort>"
-    toSexp (AI.FunSort dom cod) = constr "funsort" [toSexp dom, toSexp cod]
-    toSexp (AI.UnivSort srt) = constr "univsort" [toSexp srt]
-    toSexp (AI.MetaS id es) = Atom "<metasort>"
-    toSexp (AI.DefS q es) = constr "defsort" (toSexp q : map toSexp es)
-    toSexp (AI.DummyS s) = constr "dummysort" [String s]
+instance Sexpable AI.Sort where
+    toSexp (AI.Type lvl) = constr "sort-set" [toSexp lvl]
+    toSexp (AI.Prop lvl) = constr "sort-prop" [toSexp lvl]
+    toSexp (AI.Inf _ k) = constr "sort-setω" [toSexp k]
+    toSexp (AI.SSet lvl) = constr "sort-sset" [toSexp lvl]
+    toSexp AI.SizeUniv = constr "sort-size" []
+    toSexp AI.LockUniv = constr "sort-lock" []
+    toSexp AI.IntervalUniv = constr "sort-interval" []
+    toSexp (AI.PiSort (AI.Dom _ _ _ _ t) s (Abs n u)) = constr "sort-pi" [toSexp n, toSexp t, toSexp u]
+    toSexp (AI.PiSort (AI.Dom _ _ _ _ t) s (NoAbs n u)) = constr "sort-pi" [toSexp n, toSexp t, toSexp u]
+    toSexp (AI.FunSort t u) = constr "sort-fun" [toSexp t, toSexp u]
+    toSexp (AI.UnivSort srt) = constr "sort-sort" [toSexp srt]
+    toSexp (AI.MetaS mid es) = constr "sort-meta" (toSexp mid : map toSexp es)
+    toSexp (AI.DefS q es) = constr "sort-def" (toSexp q : map toSexp es)
+    toSexp (AI.DummyS s) = constr "sort-dummy" [String s]
 
 instance Sexpable TCM.Definition where
     toSexp d = constr "definition" [ toSexp (TCM.defName d),
                                      toSexp (TCM.defType d),
                                      toSexp (TCM.theDef d)
                                     ]
-
 instance Sexpable TCM.Defn where
-    toSexp (TCM.AxiomDefn ax) = Atom "<axiom>"
-    toSexp (TCM.DataOrRecSigDefn dat) = Atom "<data-or-rec>"
-    toSexp (TCM.GeneralizableVar) = Atom "generalizable-var"
+    toSexp (TCM.Axiom {}) = constr "axiom" []
+    toSexp (TCM.DataOrRecSig {}) = constr "data-or-record" []
+    toSexp (TCM.GeneralizableVar) = constr "generalizable-var" []
     toSexp (TCM.AbstractDefn d) = constr "abstract" [toSexp d]
-    toSexp (d@(TCM.FunctionDefn _)) = constr "function" (map toSexp $ TCM.funClauses d)
-    toSexp (TCM.DatatypeDefn dat) = Atom "<data>"
-    toSexp (TCM.RecordDefn dat) = Atom "<record>"
-    toSexp (TCM.ConstructorDefn dat) = Atom "<constructor>"
-    toSexp (TCM.PrimitiveDefn dat) = Atom "<primitive>"
-    toSexp (TCM.PrimitiveSortDefn dat) = Atom "<primitive-sort>"
+    toSexp (TCM.Function {funClauses=cls}) = constr "function" (map toSexp cls)
+    toSexp (TCM.Datatype {dataCons=cns, dataSort=srt}) = constr "data" (toSexp srt : map toSexp cns)
+    toSexp (TCM.Record {recFields=fds, recConHead=AI.ConHead{conName=q}}) = constr "record" (toSexp q : map toSexp fds)
+    toSexp (TCM.Constructor {conData=d}) = constr "constructor" [toSexp d]
+    toSexp (TCM.Primitive {primName=s, primClauses=cls}) = constr "primitive" (toSexp s : map toSexp cls)
+    toSexp (TCM.PrimitiveSort {primSortName=q, primSortSort=s}) = constr "sort" [toSexp q, toSexp s]
 
 instance Sexpable AI.Clause where
     toSexp cls = constr "clause" [toSexp (clauseTel cls), toSexp (clauseBody cls)]
