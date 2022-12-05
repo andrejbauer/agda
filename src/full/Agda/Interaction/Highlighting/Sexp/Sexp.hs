@@ -1,6 +1,6 @@
 -- | A very simple implementation of S-expressions that can be dumped to Text easily
 
-module Agda.Interaction.Highlighting.SexpDump.Sexp where
+module Agda.Interaction.Highlighting.Sexp.Sexp where
 
 import Data.Word
 import Data.Text.Lazy (Text)
