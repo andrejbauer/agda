@@ -1,10 +1,10 @@
 -- | Backend for generating Agda abstract syntax trees as s-expressions.
 
-module Agda.Interaction.Highlighting.SexpDump.Backend
-  ( sexpDumpBackend
+module Agda.Interaction.Highlighting.Sexp.Backend
+  ( sexpBackend
   ) where
 
-import Agda.Interaction.Highlighting.SexpDump.Base
+import Agda.Interaction.Highlighting.Sexp.Base
 
 import Control.DeepSeq
 import Control.Monad.Trans ( MonadIO )
@@ -37,116 +37,116 @@ import Agda.TypeChecking.Monad
 
 -- | Command-line options for AST generation
 
-data SexpDumpFlags = SexpDumpFlags
+data SexpFlags = SexpFlags
   { astFlagEnabled              :: Bool
   , astFlagDir                  :: FilePath
   } deriving (Eq, Generic)
 
-instance NFData SexpDumpFlags
+instance NFData SexpFlags
 
-data SexpDumpEnv = SexpDumpEnv
+data SexpEnv = SexpEnv
   { astDir :: FilePath }
 
-data SexpDumpModuleEnv = SexpDumpModuleEnv
+data SexpModuleEnv = SexpModuleEnv
   { moduleName :: TopLevelModuleName
   }
 
-sexpDumpBackend :: Backend
-sexpDumpBackend = Backend sexpDumpBackend'
+sexpBackend :: Backend
+sexpBackend = Backend sexpBackend'
 
-sexpDumpBackend' :: Backend' SexpDumpFlags SexpDumpEnv () () Definition
-sexpDumpBackend' = Backend'
+sexpBackend' :: Backend' SexpFlags SexpEnv () () Definition
+sexpBackend' = Backend'
   { backendName           = "Abstract syntax dump as s-expressions"
   , backendVersion        = Nothing
-  , options               = initialSexpDumpFlags
+  , options               = initialSexpFlags
   , commandLineFlags      = astFlags
   , isEnabled             = astFlagEnabled
-  , preCompile            = preCompileSexpDump
-  , preModule             = preModuleSexpDump
-  , compileDef            = compileDefSexpDump
-  , postModule            = postModuleSexpDump
-  , postCompile           = postCompileSexpDump
+  , preCompile            = preCompileSexp
+  , preModule             = preModuleSexp
+  , compileDef            = compileDefSexp
+  , postModule            = postModuleSexp
+  , postCompile           = postCompileSexp
   -- --only-scope-checking works, but with the caveat that cross-module links
   -- will not have their definition site populated.
   , scopeCheckingSuffices = False
   , mayEraseType          = const $ return False
   }
 
-defaultSexpDumpDir :: String
-defaultSexpDumpDir = "ast-dump"
+defaultSexpDir :: String
+defaultSexpDir = "ast-dump"
 
-initialSexpDumpFlags :: SexpDumpFlags
-initialSexpDumpFlags = SexpDumpFlags
+initialSexpFlags :: SexpFlags
+initialSexpFlags = SexpFlags
   { astFlagEnabled   = False
-  , astFlagDir       = defaultSexpDumpDir
+  , astFlagDir       = defaultSexpDir
   }
 
-astOptsOfFlags :: SexpDumpFlags -> SexpDumpOptions
-astOptsOfFlags flags = SexpDumpOptions
+astOptsOfFlags :: SexpFlags -> SexpOptions
+astOptsOfFlags flags = SexpOptions
   { astOptDir = astFlagDir flags
   }
 
-astFlags :: [OptDescr (Flag SexpDumpFlags)]
+astFlags :: [OptDescr (Flag SexpFlags)]
 astFlags =
     [ Option []     ["ast-dump"] (NoArg astFlag)
                     "generate AST files"
     , Option []     ["ast-dir"] (ReqArg astDirFlag "DIR")
                     ("directory in which AST files are placed (default: " ++
-                     defaultSexpDumpDir ++ ")")
+                     defaultSexpDir ++ ")")
     ]
 
-astFlag :: Flag SexpDumpFlags
+astFlag :: Flag SexpFlags
 astFlag o = return $ o { astFlagEnabled = True }
 
-astDirFlag :: FilePath -> Flag SexpDumpFlags
+astDirFlag :: FilePath -> Flag SexpFlags
 astDirFlag d o = return $ o { astFlagDir = d }
 
-runLogSexpDumpWithMonadDebug :: MonadDebug m => LogSexpDumpT m a -> m a
-runLogSexpDumpWithMonadDebug = runLogSexpDumpWith $ reportS "ast-dump" 1
+runLogSexpWithMonadDebug :: MonadDebug m => LogSexpT m a -> m a
+runLogSexpWithMonadDebug = runLogSexpWith $ reportS "ast-dump" 1
 
-preCompileSexpDump
+preCompileSexp
   :: (MonadIO m, MonadDebug m)
-  => SexpDumpFlags
-  -> m SexpDumpEnv
-preCompileSexpDump flags = runLogSexpDumpWithMonadDebug $ do
-  return (SexpDumpEnv $ astFlagDir flags)
+  => SexpFlags
+  -> m SexpEnv
+preCompileSexp flags = runLogSexpWithMonadDebug $ do
+  return (SexpEnv $ astFlagDir flags)
 
-preModuleSexpDump
+preModuleSexp
   :: Applicative m
-  => SexpDumpEnv
+  => SexpEnv
   -> IsMain
   -> TopLevelModuleName
   -> Maybe FilePath
   -> m (Recompile () ())
-preModuleSexpDump _env _isMain _modName _ifacePath = pure $ Recompile ()
+preModuleSexp _env _isMain _modName _ifacePath = pure $ Recompile ()
 
-compileDefSexpDump
+compileDefSexp
   :: Applicative m
-  => SexpDumpEnv
+  => SexpEnv
   -> ()
   -> IsMain
   -> Definition
   -> m Definition
-compileDefSexpDump _env _menv _isMain def = pure def
+compileDefSexp _env _menv _isMain def = pure def
 
-postModuleSexpDump
+postModuleSexp
   :: (MonadIO m, MonadDebug m, ReadTCState m)
-  => SexpDumpEnv
+  => SexpEnv
   -> ()
   -> IsMain
   -> TopLevelModuleName
   -> [Definition]
   -> m ()
-postModuleSexpDump env menv _isMain modName defs = do
+postModuleSexp env menv _isMain modName defs = do
   astSrc <- srcFileOfInterface modName <$> curIF
-  runLogSexpDumpWithMonadDebug $ defaultPageGen opts astSrc defs
+  runLogSexpWithMonadDebug $ defaultPageGen opts astSrc defs
     where
-      opts = SexpDumpOptions (astDir env)
+      opts = SexpOptions (astDir env)
 
-postCompileSexpDump
+postCompileSexp
   :: Applicative m
-  => SexpDumpEnv
+  => SexpEnv
   -> IsMain
   -> Map TopLevelModuleName ()
   -> m ()
-postCompileSexpDump _cenv _isMain _modulesByName = pure ()
+postCompileSexp _cenv _isMain _modulesByName = pure ()
