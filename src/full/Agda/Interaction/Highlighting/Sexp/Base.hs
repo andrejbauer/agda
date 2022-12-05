@@ -1,16 +1,16 @@
 
 -- | Function for generating highlighted AST
 
-module Agda.Interaction.Highlighting.SexpDump.Base
-  ( SexpDumpOptions(..)
+module Agda.Interaction.Highlighting.Sexp.Base
+  ( SexpOptions(..)
   , srcFileOfInterface
   , defaultPageGen
-  , MonadLogSexpDump(logSexpDump)
-  , LogSexpDumpT
-  , runLogSexpDumpWith
+  , MonadLogSexp(logSexp)
+  , LogSexpT
+  , runLogSexpWith
   ) where
 
-import Agda.Interaction.Highlighting.SexpDump.Sexp
+import Agda.Interaction.Highlighting.Sexp.Sexp
 
 
 import Control.DeepSeq
@@ -78,7 +78,7 @@ dumpFileExt ft =
 
 -- | Options for AST dump
 
-data SexpDumpOptions = SexpDumpOptions
+data SexpOptions = SexpOptions
   { astOptDir                  :: FilePath
   } deriving Eq
 
@@ -97,29 +97,29 @@ srcFileOfInterface m i = SourceFile m i
 
 -- | Logging during AST generation
 
-type SexpDumpLogMessage = String
-type SexpDumpLogAction m = SexpDumpLogMessage -> m ()
+type SexpLogMessage = String
+type SexpLogAction m = SexpLogMessage -> m ()
 
-class MonadLogSexpDump m where
-  logSexpDump :: SexpDumpLogAction m
+class MonadLogSexp m where
+  logSexp :: SexpLogAction m
 
-type LogSexpDumpT m = ReaderT (SexpDumpLogAction m) m
+type LogSexpT m = ReaderT (SexpLogAction m) m
 
-instance Monad m => MonadLogSexpDump (LogSexpDumpT m) where
-  logSexpDump message = do
+instance Monad m => MonadLogSexp (LogSexpT m) where
+  logSexp message = do
     doLog <- ask
     lift $ doLog message
 
-runLogSexpDumpWith :: Monad m => SexpDumpLogAction m -> LogSexpDumpT m a -> m a
-runLogSexpDumpWith = flip runReaderT
+runLogSexpWith :: Monad m => SexpLogAction m -> LogSexpT m a -> m a
+runLogSexpWith = flip runReaderT
 
 renderSourceFile :: TopLevelModuleName -> TCM.Interface -> [TCM.Definition] -> Text
 renderSourceFile moduleName iface defs =
     toText $ constr "module" (toSexp moduleName : map toSexp defs)
 
-defaultPageGen :: (MonadIO m, MonadLogSexpDump m) => SexpDumpOptions -> SourceFile -> [TCM.Definition] -> m ()
+defaultPageGen :: (MonadIO m, MonadLogSexp m) => SexpOptions -> SourceFile -> [TCM.Definition] -> m ()
 defaultPageGen opts (SourceFile moduleName iface) defs = do
-  logSexpDump $ render $ "Generating AST for"  <+> pretty moduleName <+> ((parens (pretty target)) <> ".")
+  logSexp $ render $ "Generating AST for"  <+> pretty moduleName <+> ((parens (pretty target)) <> ".")
   liftIO $ UTF8.writeTextToFile target sexps
   where
     ext = dumpFileExt (TCM.iFileType iface)
