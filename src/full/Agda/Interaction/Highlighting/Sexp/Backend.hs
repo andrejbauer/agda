@@ -35,17 +35,17 @@ import Agda.TypeChecking.Monad
   )
 
 
--- | Command-line options for AST generation
+-- | Command-line options for s-expression generation
 
 data SexpFlags = SexpFlags
-  { astFlagEnabled              :: Bool
-  , astFlagDir                  :: FilePath
+  { sexpFlagEnabled              :: Bool
+  , sexpFlagDir                  :: FilePath
   } deriving (Eq, Generic)
 
 instance NFData SexpFlags
 
 data SexpEnv = SexpEnv
-  { astDir :: FilePath }
+  { sexpDir :: FilePath }
 
 data SexpModuleEnv = SexpModuleEnv
   { moduleName :: TopLevelModuleName
@@ -59,8 +59,8 @@ sexpBackend' = Backend'
   { backendName           = "Abstract syntax dump as s-expressions"
   , backendVersion        = Nothing
   , options               = initialSexpFlags
-  , commandLineFlags      = astFlags
-  , isEnabled             = astFlagEnabled
+  , commandLineFlags      = sexpFlags
+  , isEnabled             = sexpFlagEnabled
   , preCompile            = preCompileSexp
   , preModule             = preModuleSexp
   , compileDef            = compileDefSexp
@@ -73,43 +73,45 @@ sexpBackend' = Backend'
   }
 
 defaultSexpDir :: String
-defaultSexpDir = "ast-dump"
+defaultSexpDir = "sexp"
 
 initialSexpFlags :: SexpFlags
 initialSexpFlags = SexpFlags
-  { astFlagEnabled   = False
-  , astFlagDir       = defaultSexpDir
+  { sexpFlagEnabled   = False
+  , sexpFlagDir       = defaultSexpDir
   }
 
-astOptsOfFlags :: SexpFlags -> SexpOptions
-astOptsOfFlags flags = SexpOptions
-  { astOptDir = astFlagDir flags
+sexpOptsOfFlags :: SexpFlags -> SexpOptions
+sexpOptsOfFlags flags = SexpOptions
+  { sexpOptDir = sexpFlagDir flags
   }
 
-astFlags :: [OptDescr (Flag SexpFlags)]
-astFlags =
-    [ Option []     ["ast-dump"] (NoArg astFlag)
-                    "generate AST files"
-    , Option []     ["ast-dir"] (ReqArg astDirFlag "DIR")
-                    ("directory in which AST files are placed (default: " ++
+sexpFlags :: [OptDescr (Flag SexpFlags)]
+sexpFlags =
+    [ Option []     ["sexp"] (NoArg sexpFlag)
+                    "generate internal abstract syntax trees as s-expressions"
+    , Option []     ["sexp-dir"] (ReqArg sexpDirFlag "DIR")
+                    ("directory in which s-expression files are placed (default: " ++
                      defaultSexpDir ++ ")")
     ]
 
-astFlag :: Flag SexpFlags
-astFlag o = return $ o { astFlagEnabled = True }
+sexpFlag :: Flag SexpFlags
+sexpFlag o = return $ o { sexpFlagEnabled = True }
 
-astDirFlag :: FilePath -> Flag SexpFlags
-astDirFlag d o = return $ o { astFlagDir = d }
+sexpDirFlag :: FilePath -> Flag SexpFlags
+sexpDirFlag d o = return $ o { sexpFlagDir = d }
 
 runLogSexpWithMonadDebug :: MonadDebug m => LogSexpT m a -> m a
-runLogSexpWithMonadDebug = runLogSexpWith $ reportS "ast-dump" 1
+runLogSexpWithMonadDebug = runLogSexpWith $ reportS "sexp" 1
 
 preCompileSexp
   :: (MonadIO m, MonadDebug m)
   => SexpFlags
   -> m SexpEnv
 preCompileSexp flags = runLogSexpWithMonadDebug $ do
-  return (SexpEnv $ astFlagDir flags)
+  let sexpDir = sexpFlagDir flags
+  prepareOutputDirectory sexpDir
+  return $ SexpEnv sexpDir
 
 preModuleSexp
   :: Applicative m
@@ -138,10 +140,10 @@ postModuleSexp
   -> [Definition]
   -> m ()
 postModuleSexp env menv _isMain modName defs = do
-  astSrc <- srcFileOfInterface modName <$> curIF
-  runLogSexpWithMonadDebug $ defaultPageGen opts astSrc defs
+  sexpSrc <- srcFileOfInterface modName <$> curIF
+  runLogSexpWithMonadDebug $ defaultSexpGen opts sexpSrc defs
     where
-      opts = SexpOptions (astDir env)
+      opts = SexpOptions (sexpDir env)
 
 postCompileSexp
   :: Applicative m
