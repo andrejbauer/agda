@@ -483,9 +483,9 @@ warningNameDescription = \case
   UnsolvedInteractionMetas_        -> "Unsolved interaction meta variables."
   InteractionMetaBoundaries_       -> "Interaction meta variables that have unsolved boundary constraints."
   UnsolvedMetaVariables_           -> "Unsolved meta variables."
-  UserWarning_                     -> "User-defined warnings via one of the 'WARNING_ON_*' pragmas."
-  WithoutKFlagPrimEraseEquality_   -> "Uses of `primEraseEquality' with the without-K flags."
-  WrongInstanceDeclaration_        -> "Instances that do not adhere to the required format."
+  UserWarning_                     -> "User-defined warning added using one of the 'WARNING_ON_*' pragmas."
+  WithoutKFlagPrimEraseEquality_   -> "`primEraseEquality' usages with the without-K flags."
+  WrongInstanceDeclaration_        -> "Terms marked as eligible for instance search should end with a name."
   -- Checking consistency of options
   CoInfectiveImport_               -> "Importing a file not using e.g. `--safe'  from one which does."
   InfectiveImport_                 -> "Importing a file using e.g. `--cubical' into one which does not."
