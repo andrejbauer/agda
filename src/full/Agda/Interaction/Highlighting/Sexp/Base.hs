@@ -165,7 +165,7 @@ instance Sexpable Literal where
     toSexp (LitNat k) = toSexp k
     toSexp (LitWord64 w) = toSexp w
     toSexp (LitFloat x) = toSexp x
-    toSexp (LitString s) = toSexp $ show s
+    toSexp (LitString s) = toSexp s
     toSexp (LitChar c) = toSexp [c]
     toSexp (LitQName q) = toSexp q
     toSexp (LitMeta mdl mid) = constr "meta" [toSexp mdl, toSexp mid]
