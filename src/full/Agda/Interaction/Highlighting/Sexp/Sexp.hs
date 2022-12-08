@@ -5,7 +5,6 @@ module Agda.Interaction.Highlighting.Sexp.Sexp where
 import Data.Word
 import Data.Text.Lazy (Text)
 import qualified Data.Text.Lazy as T
-import Data.Text (pack, replace, unpack)
 
 data Sexp = Atom Text | String String | Integer Integer | Double Double | Cons [Sexp]
 
@@ -16,7 +15,7 @@ toText :: Sexp -> T.Text
 toText (Atom x)   = x
 toText (Integer k) = T.pack $ show k
 toText (Double x) = T.pack $ show x
-toText (String s) = '"' `T.cons` T.pack s `T.snoc` '"'
+toText (String s) = T.pack $ show s
 toText (Cons lst) = '(' `T.cons` (T.intercalate (T.singleton ' ') (map toText lst)) `T.snoc` ')'
 
 class Sexpable a where
@@ -30,7 +29,7 @@ instance Sexpable Integer where
     toSexp k = Integer k
 
 instance Sexpable String where
-    toSexp s = String (unpack (replace "\"" "\\\"" (pack s)))
+    toSexp = String
 
 instance Sexpable Double where
     toSexp = Double
