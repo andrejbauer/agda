@@ -5,6 +5,7 @@ module Agda.Interaction.Highlighting.Sexp.Sexp where
 import Data.Word
 import Data.Text.Lazy (Text)
 import qualified Data.Text.Lazy as T
+import Data.Text (pack, replace, unpack)
 
 data Sexp = Atom Text | String String | Integer Integer | Double Double | Cons [Sexp]
 
@@ -29,7 +30,7 @@ instance Sexpable Integer where
     toSexp k = Integer k
 
 instance Sexpable String where
-    toSexp = String
+    toSexp s = String (unpack (replace "\"" "\\\"" (pack s)))
 
 instance Sexpable Double where
     toSexp = Double
