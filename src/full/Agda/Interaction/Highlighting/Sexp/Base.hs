@@ -151,9 +151,9 @@ instance Sexpable a => Sexpable (EL.Elim' a) where
     toSexp (EL.Proj _ q) = constr "proj" [toSexp q]
     toSexp (EL.IApply x y r) = constr "interval-arg" [toSexp x, toSexp y, toSexp r]
 
--- instance Sexpable a => Sexpable (AI.Abs a) where
---     toSexp (AI.Abs n e) = constr "abs" [toSexp n, toSexp e]
---     toSexp (NoAbs n e) = constr "noabs" [toSexp n, toSexp e]
+instance Sexpable a => Sexpable (AI.Abs a) where
+    toSexp (AI.Abs n e) = constr ":bound" [toSexp n, toSexp e]
+    toSexp (NoAbs n e) = constr ":anonymous" [toSexp e]
 
 instance Sexpable t => Sexpable (AI.Dom t) where
     toSexp (AI.Dom _ _ _ _ t) = toSexp t
@@ -172,13 +172,11 @@ instance Sexpable Literal where
 
 instance Sexpable AI.Term where
     toSexp (AI.Var k es) = constr "var" (Integer (toInteger k) : map toSexp es)
-    toSexp (AI.Lam _ (AI.Abs x e)) = constr "lambda" [String x, toSexp e]
-    toSexp (AI.Lam _ (AI.NoAbs x e)) = constr "lambda" [String x, toSexp e]
+    toSexp (AI.Lam _ a) = constr "lambda" [toSexp a]
     toSexp (AI.Lit lit) = constr "literal" [toSexp lit]
-    toSexp (AI.Def q es) = constr "apply" [toSexp q, Cons $ map toSexp es]
+    toSexp (AI.Def q es) = constr "apply" (toSexp q :  map toSexp es)
     toSexp (AI.Con (AI.ConHead q _ _ _) _ es) = constr "constr" (toSexp q : map toSexp es)
-    toSexp (AI.Pi (AI.Dom _ _ _ _ t) (AI.Abs x e)) = constr "pi" [String x, toSexp t, toSexp e]
-    toSexp (AI.Pi (AI.Dom _ _ _ _ t) (AI.NoAbs x e)) = constr "pi" [String x, toSexp t, toSexp e]
+    toSexp (AI.Pi (AI.Dom _ _ _ _ t) a) = constr "pi" [toSexp t, toSexp a]
     toSexp (AI.Sort s) = constr "sort" [toSexp s]
     toSexp (AI.Level lvl) = constr "level" [toSexp lvl]
     toSexp (AI.MetaV mid es) = constr "meta" (toSexp mid : map toSexp es)
@@ -202,8 +200,7 @@ instance Sexpable AI.Sort where
     toSexp AI.SizeUniv = constr "sort-size" []
     toSexp AI.LockUniv = constr "sort-lock" []
     toSexp AI.IntervalUniv = constr "sort-interval" []
-    toSexp (AI.PiSort (AI.Dom _ _ _ _ t) s (Abs n u)) = constr "sort-pi" [toSexp n, toSexp t, toSexp u]
-    toSexp (AI.PiSort (AI.Dom _ _ _ _ t) s (NoAbs n u)) = constr "sort-pi" [toSexp n, toSexp t, toSexp u]
+    toSexp (AI.PiSort (AI.Dom _ _ _ _ t) s a) = constr "sort-pi" [toSexp t, toSexp s, toSexp a]
     toSexp (AI.FunSort t u) = constr "sort-fun" [toSexp t, toSexp u]
     toSexp (AI.UnivSort srt) = constr "sort-sort" [toSexp srt]
     toSexp (AI.MetaS mid es) = constr "sort-meta" (toSexp mid : map toSexp es)
@@ -228,14 +225,15 @@ instance Sexpable TCM.Defn where
     toSexp (TCM.PrimitiveSort {primSortName=q, primSortSort=s}) = constr "sort" [toSexp q, toSexp s]
 
 instance Sexpable AI.Clause where
-    toSexp (AI.Clause {clauseTel=tel, clauseBody=Nothing}) = constr "clause" [toSexp tel]
+    toSexp (AI.Clause {clauseTel=tel, clauseBody=Nothing}) = constr "absurd-clause" [toSexp tel]
     toSexp (AI.Clause {clauseTel=tel, clauseBody=Just bdy}) = constr "clause" [toSexp tel, toSexp bdy]
 
 instance Sexpable AI.Telescope where
-    toSexp tel = Cons $ process tel
-        where process AI.EmptyTel = []
-              process (AI.ExtendTel t (Abs n tel)) = (constr "arg" [toSexp n, toSexp t]) : process tel
-              process (AI.ExtendTel t (NoAbs n tel)) = (constr "arg" [toSexp n, toSexp t]) : process tel
+    toSexp tel = constr "telescope" $ telescopeToList tel
+        where telescopeToList :: AI.Telescope -> [Sexp]
+              telescopeToList AI.EmptyTel = []
+              telescopeToList (AI.ExtendTel t (Abs n tel)) = (constr ":bound" [toSexp n, toSexp t]) : telescopeToList tel
+              telescopeToList (AI.ExtendTel t (NoAbs n tel)) = (constr ":anonymous" [toSexp n, toSexp t]) : telescopeToList tel
 
 instance Sexpable TopLevelModuleName where
     toSexp (TopLevelModuleName rng (ModuleNameHash id) ps) = constr "module-name" $ map (Atom . T.fromStrict) $ toList ps
