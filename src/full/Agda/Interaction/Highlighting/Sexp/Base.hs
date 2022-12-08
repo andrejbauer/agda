@@ -238,4 +238,4 @@ instance Sexpable AI.Telescope where
               process (AI.ExtendTel t (NoAbs n tel)) = (constr "arg" [toSexp n, toSexp t]) : process tel
 
 instance Sexpable TopLevelModuleName where
-    toSexp (TopLevelModuleName rng (ModuleNameHash id) ps) = constr "name" $ map (Atom . T.fromStrict) $ toList ps
+    toSexp (TopLevelModuleName rng (ModuleNameHash id) ps) = constr "module-name" $ map (Atom . T.fromStrict) $ toList ps
