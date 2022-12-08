@@ -152,8 +152,8 @@ instance Sexpable a => Sexpable (EL.Elim' a) where
     toSexp (EL.IApply x y r) = constr "interval-arg" [toSexp x, toSexp y, toSexp r]
 
 instance Sexpable a => Sexpable (AI.Abs a) where
-    toSexp (AI.Abs n e) = constr ":bound" [toSexp n, toSexp e]
-    toSexp (NoAbs n e) = constr ":anonymous" [toSexp e]
+    toSexp (AI.Abs n e) = constr "bound" [toSexp n, toSexp e]
+    toSexp (NoAbs n e) = constr "anonymous" [toSexp e]
 
 instance Sexpable t => Sexpable (AI.Dom t) where
     toSexp (AI.Dom _ _ _ _ t) = toSexp t
@@ -232,8 +232,8 @@ instance Sexpable AI.Telescope where
     toSexp tel = constr "telescope" $ telescopeToList tel
         where telescopeToList :: AI.Telescope -> [Sexp]
               telescopeToList AI.EmptyTel = []
-              telescopeToList (AI.ExtendTel t (Abs n tel)) = (constr ":bound" [toSexp n, toSexp t]) : telescopeToList tel
-              telescopeToList (AI.ExtendTel t (NoAbs n tel)) = (constr ":anonymous" [toSexp n, toSexp t]) : telescopeToList tel
+              telescopeToList (AI.ExtendTel t (Abs n tel)) = (constr "bound" [toSexp n, toSexp t]) : telescopeToList tel
+              telescopeToList (AI.ExtendTel t (NoAbs n tel)) = (constr "anonymous" [toSexp n, toSexp t]) : telescopeToList tel
 
 instance Sexpable TopLevelModuleName where
     toSexp (TopLevelModuleName rng (ModuleNameHash id) ps) = constr "module-name" $ map (Atom . T.fromStrict) $ toList ps

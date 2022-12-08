@@ -56,7 +56,7 @@ sexpBackend = Backend sexpBackend'
 
 sexpBackend' :: Backend' SexpFlags SexpEnv () () Definition
 sexpBackend' = Backend'
-  { backendName           = "Abstract syntax dump as s-expressions"
+  { backendName           = "S-expression backend options"
   , backendVersion        = Nothing
   , options               = initialSexpFlags
   , commandLineFlags      = sexpFlags
