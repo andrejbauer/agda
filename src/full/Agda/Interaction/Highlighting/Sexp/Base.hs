@@ -109,8 +109,8 @@ runLogSexpWith :: Monad m => SexpLogAction m -> LogSexpT m a -> m a
 runLogSexpWith = flip runReaderT
 
 renderSourceFile :: TopLevelModuleName -> TCM.Interface -> [TCM.Definition] -> Text
-renderSourceFile moduleName iface defs =
-    toText $ constr "module" (toSexp moduleName : map toSexp defs)
+renderSourceFile mdl iface defs =
+    toText $ constr "module" (toSexp mdl : map toSexp defs)
 
 defaultSexpGen :: (MonadIO m, MonadLogSexp m) => SexpOptions -> SourceFile -> [TCM.Definition] -> m ()
 defaultSexpGen opts (SourceFile moduleName iface) defs = do
@@ -228,17 +228,14 @@ instance Sexpable TCM.Defn where
     toSexp (TCM.PrimitiveSort {primSortName=q, primSortSort=s}) = constr "sort" [toSexp q, toSexp s]
 
 instance Sexpable AI.Clause where
-    toSexp cls = constr "clause" [toSexp (clauseTel cls), toSexp (clauseBody cls)]
-
-instance Sexpable (Maybe AI.Term) where
-    toSexp Nothing = constr "absurd" []
-    toSexp (Just e) = toSexp e
+    toSexp (AI.Clause {clauseTel=tel, clauseBody=Nothing}) = constr "clause" [toSexp tel]
+    toSexp (AI.Clause {clauseTel=tel, clauseBody=Just bdy}) = constr "clause" [toSexp tel, toSexp bdy]
 
 instance Sexpable AI.Telescope where
     toSexp tel = Cons $ process tel
         where process AI.EmptyTel = []
               process (AI.ExtendTel t (Abs n tel)) = (constr "arg" [toSexp n, toSexp t]) : process tel
-              process (AI.ExtendTel t (NoAbs n tel)) = [constr "internal-error" []]
+              process (AI.ExtendTel t (NoAbs n tel)) = (constr "arg" [toSexp n, toSexp t]) : process tel
 
 instance Sexpable TopLevelModuleName where
-    toSexp (TopLevelModuleName rng (ModuleNameHash id) ps) = constr "hash" [toSexp id]
+    toSexp (TopLevelModuleName rng (ModuleNameHash id) ps) = Cons $ map (Atom . T.fromStrict) $ toList ps
