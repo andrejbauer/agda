@@ -146,10 +146,9 @@ extractParameters q ty = reduce (unEl ty) >>= \case
     postPs <- checkInternal' reconstructAction prePs CmpEq (dt , Def d)
     reportSDoc "tc.reconstruct" 50 $ "Traversed parameters:" <+> pretty postPs
     info <- getConstInfo q
-    let mkParam erasure =
-            applyWhen erasure (applyQuantity zeroQuantity)
-          . hideAndRelParams
-          . isApplyElim' __IMPOSSIBLE__
+    let mkParam = applyQuantity zeroQuantity
+                . hideAndRelParams
+                . isApplyElim' __IMPOSSIBLE__
     if -- Case: data or record constructor
        | Constructor{ conPars = n, conErasure = e } <- theDef info ->
            return $ map (mkParam e) $ take n postPs
