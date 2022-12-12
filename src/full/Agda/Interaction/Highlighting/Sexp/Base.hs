@@ -137,10 +137,11 @@ instance Sexpable Name where
     toSexp n = Atom (T.pack $ prettyShow $ nameConcrete n)
 
 instance Sexpable ModuleName where
-    toSexp (MName lst) = constr "mname" $ map toSexp lst
+    toSexp (MName lst) = constr "module-name" $ map toSexp lst
 
 instance Sexpable QName where
-    toSexp (QName (MName lst) nam) = constr "name" $ (map toSexp lst ++ [toSexp nam])
+    toSexp (QName (MName lst) nam) = constr "name" $ ((mkId $ nameId nam) ++ map toSexp lst ++ [toSexp nam])
+        where mkId (NameId i (ModuleNameHash m)) = [toSexp m, toSexp i]
 
 instance Sexpable Suffix where
     toSexp NoSuffix = Atom "none"
@@ -238,4 +239,4 @@ instance Sexpable AI.Telescope where
               telescopeToList (AI.ExtendTel t (NoAbs n tel)) = (constr "anonymous" [toSexp n, toSexp t]) : telescopeToList tel
 
 instance Sexpable TopLevelModuleName where
-    toSexp (TopLevelModuleName rng (ModuleNameHash id) ps) = constr "module-name" $ map (Atom . T.fromStrict) $ toList ps
+    toSexp (TopLevelModuleName rng (ModuleNameHash id) ps) = constr "module-name" (toSexp id : (map (Atom . T.fromStrict) $ toList ps))
