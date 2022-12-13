@@ -137,10 +137,11 @@ instance Sexpable Name where
     toSexp n = Atom (T.pack $ prettyShow $ nameConcrete n)
 
 instance Sexpable ModuleName where
-    toSexp (MName lst) = constr "mname" $ map toSexp lst
+    toSexp (MName lst) = constr "module-name" $ map toSexp lst
 
 instance Sexpable QName where
-    toSexp (QName (MName lst) nam) = constr "name" $ (map toSexp lst ++ [toSexp nam])
+    toSexp (QName (MName lst) nam) = constr "name" $ ((mkId $ nameId nam) ++ map toSexp lst ++ [toSexp nam])
+        where mkId (NameId i (ModuleNameHash m)) = [toSexp m, toSexp i]
 
 instance Sexpable Suffix where
     toSexp NoSuffix = Atom "none"
@@ -210,19 +211,21 @@ instance Sexpable t => Sexpable (AI.PlusLevel' t) where
     toSexp (AI.Plus k t) = constr "plus" [toSexp k, toSexp t]
 
 instance Sexpable AI.Sort where
-    toSexp (AI.Type lvl) = constr "sort-set" [toSexp lvl]
-    toSexp (AI.Prop lvl) = constr "sort-prop" [toSexp lvl]
-    toSexp (AI.Inf _ k) = constr "sort-setω" [toSexp k]
-    toSexp (AI.SSet lvl) = constr "sort-sset" [toSexp lvl]
-    toSexp AI.SizeUniv = constr "sort-size" []
-    toSexp AI.LockUniv = constr "sort-lock" []
-    toSexp AI.IntervalUniv = constr "sort-interval" []
-    toSexp (AI.PiSort (AI.Dom _ _ _ _ t) s a) = constr "sort-pi" [toSexp t, toSexp s, toSexp a]
-    toSexp (AI.FunSort t u) = constr "sort-fun" [toSexp t, toSexp u]
-    toSexp (AI.UnivSort srt) = constr "sort-sort" [toSexp srt]
-    toSexp (AI.MetaS mid es) = constr "sort-meta" (toSexp mid : map toSexp es)
-    toSexp (AI.DefS q es) = constr "sort-def" (toSexp q : map toSexp es)
-    toSexp (AI.DummyS s) = constr "sort-dummy" [String s]
+    toSexp s = constr "sort" [sexpify s]
+      where
+        sexpify (AI.Type lvl) = constr "sort-set" [toSexp lvl]
+        sexpify (AI.Prop lvl) = constr "sort-prop" [toSexp lvl]
+        sexpify (AI.Inf _ k) = constr "sort-setω" [toSexp k]
+        sexpify (AI.SSet lvl) = constr "sort-sset" [toSexp lvl]
+        sexpify AI.SizeUniv = constr "sort-size" []
+        sexpify AI.LockUniv = constr "sort-lock" []
+        sexpify AI.IntervalUniv = constr "sort-interval" []
+        sexpify (AI.PiSort (AI.Dom _ _ _ _ t) s a) = constr "sort-pi" [toSexp t, toSexp s, toSexp a]
+        sexpify (AI.FunSort t u) = constr "sort-fun" [toSexp t, toSexp u]
+        sexpify (AI.UnivSort srt) = constr "sort-univ" [toSexp srt]
+        sexpify (AI.MetaS mid es) = constr "sort-meta" (toSexp mid : map toSexp es)
+        sexpify (AI.DefS q es) = constr "sort-def" (toSexp q : map toSexp es)
+        sexpify (AI.DummyS s) = constr "sort-dummy" [toSexp s]
 
 instance Sexpable TCM.Definition where
     toSexp d = constr "definition" [ toSexp (TCM.defName d),
@@ -277,4 +280,4 @@ instance Sexpable AI.Telescope where
               telescopeToList (AI.ExtendTel t (NoAbs n tel)) = (constr "anonymous" [toSexp n, toSexp t]) : telescopeToList tel
 
 instance Sexpable TopLevelModuleName where
-    toSexp (TopLevelModuleName rng (ModuleNameHash id) ps) = constr "module-name" $ map (Atom . T.fromStrict) $ toList ps
+    toSexp (TopLevelModuleName rng (ModuleNameHash id) ps) = constr "module-name" (toSexp id : (map (Atom . T.fromStrict) $ toList ps))
