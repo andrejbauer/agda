@@ -23,11 +23,14 @@ class Sexpable a where
     toSexp :: a -> Sexp
 
 instance Sexpable Bool where
-    toSexp False = Atom (T.pack "False")
-    toSexp True = Atom (T.pack "True")
+    toSexp False = constr "false" []
+    toSexp True = constr "true" []
 
 instance Sexpable Integer where
     toSexp k = Integer k
+
+instance Sexpable Int where
+    toSexp k = Integer (toInteger k)
 
 instance Sexpable String where
     toSexp = String

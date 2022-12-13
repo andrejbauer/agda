@@ -242,8 +242,32 @@ instance Sexpable TCM.Defn where
     toSexp (TCM.PrimitiveSort {primSortName=q, primSortSort=s}) = constr "sort" [toSexp q, toSexp s]
 
 instance Sexpable AI.Clause where
-    toSexp (AI.Clause {clauseTel=tel, clauseBody=Nothing}) = constr "absurd-clause" [toSexp tel]
-    toSexp (AI.Clause {clauseTel=tel, clauseBody=Just bdy}) = constr "clause" [toSexp tel, toSexp bdy]
+    toSexp (AI.Clause {clauseTel=tel, namedClausePats=naps, clauseType=typ, clauseBody=bdy}) =
+      constr "clause" [constr "pattern" (map toSexp naps), toSexp tel, sexpType typ, sexpBody bdy]
+        where sexpBody Nothing    = constr "no-body" []
+              sexpBody (Just bdy) = constr "body" [toSexp bdy]
+
+              sexpType Nothing = constr "no-type" []
+              sexpType (Just (Arg _ t)) = constr "type" [toSexp t]
+
+instance Sexpable a => Sexpable (AI.Pattern' a) where
+  toSexp (AI.VarP _ x) = toSexp x
+  toSexp (AI.DotP _ t)  = constr "dot" [toSexp t]
+  toSexp (AI.ConP (AI.ConHead {conName=hd}) _ args) = constr "constructor" (toSexp hd : map toSexp args)
+  toSexp (AI.LitP _ lit) = constr "literal" [toSexp lit]
+  toSexp (AI.ProjP _ n) = constr "proj" [toSexp n]
+  toSexp (AI.IApplyP _ a b x) = constr "interval-apply" [toSexp a, toSexp b, toSexp x]
+  toSexp (AI.DefP _ n args) = constr "def" (toSexp n : map toSexp args)
+
+instance Sexpable DBPatVar where
+  toSexp (AI.DBPatVar n k) = constr "pattern-var" [toSexp n, toSexp k]
+
+instance Sexpable a => Sexpable (NamedArg a) where
+  toSexp (Arg _ (Named {nameOf=Nothing, namedThing=x})) = constr "arg-noname" [toSexp x]
+  toSexp (Arg _ (Named {nameOf=Just n,  namedThing=x})) = constr "arg-name" [toSexp n, toSexp x]
+
+instance Sexpable NamedName where
+  toSexp (WithOrigin {woThing=Ranged {rangedThing=s}}) = toSexp s
 
 instance Sexpable AI.Telescope where
     toSexp tel = constr "telescope" $ telescopeToList tel
