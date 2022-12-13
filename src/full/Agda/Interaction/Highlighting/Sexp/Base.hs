@@ -146,9 +146,26 @@ instance Sexpable Suffix where
     toSexp NoSuffix = Atom "none"
     toSexp (Suffix k) = Integer k
 
+instance Sexpable Origin where
+    toSexp UserWritten = constr "user-written" []
+    toSexp Inserted = constr "inserted" []
+    toSexp Reflected = constr "reflected" []
+    toSexp CaseSplit = constr "case-split" []
+    toSexp Substitution = constr "substitution" []
+
+instance Sexpable ProjOrigin where
+    toSexp ProjPrefix = constr "user-written" []
+    toSexp ProjPostfix = constr "user-written" []
+    toSexp ProjSystem = constr "inserted" []
+
+instance Sexpable Hiding where
+  toSexp Hidden = constr "hidden" []
+  toSexp (Instance _) = constr "instance" []
+  toSexp NotHidden = constr "not-hidden" []
+
 instance Sexpable a => Sexpable (EL.Elim' a) where
-    toSexp (EL.Apply (Arg _ e)) = constr "arg" [toSexp e]
-    toSexp (EL.Proj _ q) = constr "proj" [toSexp q]
+    toSexp (EL.Apply (Arg (ArgInfo {argInfoHiding=hdn, argInfoOrigin=org}) e)) = constr "arg" [toSexp hdn, toSexp org, toSexp e]
+    toSexp (EL.Proj org q) = constr "proj" [toSexp org, toSexp q]
     toSexp (EL.IApply x y r) = constr "interval-arg" [toSexp x, toSexp y, toSexp r]
 
 instance Sexpable a => Sexpable (AI.Abs a) where
