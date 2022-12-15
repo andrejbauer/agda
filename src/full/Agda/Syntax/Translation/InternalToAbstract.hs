@@ -487,17 +487,8 @@ reifyTerm expandAnonDefs0 v0 = tryReifyAsLetBinding v0 $ do
   -- Andreas, 2016-07-21 if --postfix-projections
   -- then we print system-generated projections as postfix, else prefix.
   havePfp <- optPostfixProjections <$> pragmaOptions
-
-  -- Amy, 2024-01-07: postfix and system projections should still be
-  -- turned into head symbols *if* they have display forms attached.
-  hasDisplay <- liftReduce $ unKleisli hasDisplayForms
-  let
-    prefixize orig name
-      | havePfp   = (orig == ProjPrefix)  || hasDisplay name
-      | otherwise = (orig /= ProjPostfix) || hasDisplay name
-  reportSDoc "reify.term" 80 $ pure $ "reifyTerm (unSpine v) = " <+> pretty (unSpine' prefixize v)
-
-  case unSpine' prefixize v of
+  let pred = if havePfp then (== ProjPrefix) else (/= ProjPostfix)
+  case unSpine' pred v of
     -- Hack to print generalized field projections with nicer names. Should
     -- only show up in errors. Check the spined form!
     _ | I.Var n (I.Proj _ p : es) <- v,
