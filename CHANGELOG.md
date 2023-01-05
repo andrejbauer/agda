@@ -124,6 +124,7 @@ Interaction and emacs mode
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 Backends
 =======
 * Agsy ([automatic proof search](https://agda.readthedocs.io/en/v2.6.2.2.20221106/tools/auto.html)) can
@@ -136,6 +137,9 @@ Backends
 =======
 * Agsy ([automatic proof search](https://agda.readthedocs.io/en/latest/tools/auto.html)) can
 >>>>>>> cfb58c8ee (Revert "[ #6055, CHANGELOG ] latest -> v20221128.")
+=======
+* Agsy ([automatic proof search](https://agda.readthedocs.io/en/v2.6.2.2.20230105/tools/auto.html)) can
+>>>>>>> b0a9a4dc2 ([ #6055, 2.6.3 RC3 ] CHANGELOG: Updated the links to Read the Docs.)
   now be invoked in the right-hand-sides of copattern matching clauses.
   ([#5827](https://github.com/agda/agda/pull/5827))
 
