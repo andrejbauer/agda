@@ -11,3 +11,8 @@ extra-deps:
 - pqueue-1.5.0.0
 - text-icu-0.8.0.2
 - vector-hashtables-0.1.1.1
+
+# Local packages, usually specified by relative directory name
+packages:
+- '.'
+- 'src/size-solver'
