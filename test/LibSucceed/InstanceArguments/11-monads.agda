@@ -8,9 +8,9 @@
 
 module InstanceArguments.11-monads where
 
-open import Effect.Monad using (RawMonad; module RawMonad)
-open import Effect.Monad.Indexed using (RawIMonad; module RawIMonad)
---open import Effect.Applicative.Indexed using ()
+open import Category.Monad using (RawMonad; module RawMonad)
+open import Category.Monad.Indexed using (RawIMonad; module RawIMonad)
+--open import Category.Applicative.Indexed using ()
 -- identityMonad often makes monadic code ambiguous.
 --open import Effect.Monad.Identity using (IdentityMonad)
 open import Effect.Monad.Partiality using (_⊥; now; isNow; never; run_for_steps) renaming (monad to partialityMonad)
@@ -24,7 +24,7 @@ open import Data.Bool using (if_then_else_)
 open import Data.Nat using (ℕ; _≟_; _+_; suc; _*_)
 open import Relation.Nullary.Decidable using (⌊_⌋)
 open import Data.List using (List; _∷_; []; [_]; null)
-open import Data.List.Effectful using () renaming (monad to listMonad)
+open import Data.List.Categorical using () renaming (monad to listMonad)
 --open import Data.Product
 
 module RawMonadExt {li f} {I : Set li} {M : IFun I f} (m : RawIMonad M) where
