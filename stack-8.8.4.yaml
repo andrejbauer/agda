@@ -2,11 +2,6 @@ resolver: lts-16.31
 compiler: ghc-8.8.4
 compiler-check: match-exact
 
-# Local packages specified by relative directory name.
-packages:
-  - '.'
-  - 'src/size-solver'
-
 extra-deps:
 - QuickCheck-2.14.2
 - pqueue-1.4.1.2
