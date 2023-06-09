@@ -12,7 +12,7 @@ import Prelude hiding (length)
 import Control.DeepSeq
 
 import Data.Foldable (length)
-import Data.Function
+import Data.Function (on)
 import Data.Hashable (Hashable(..))
 import qualified Data.List as List
 import Data.Maybe
@@ -317,7 +317,7 @@ instance NumHoles AmbiguousQName where
 -- * name lenses
 ------------------------------------------------------------------------
 
-lensQNameName :: Lens' Name QName
+lensQNameName :: Lens' QName Name
 lensQNameName f (QName m n) = QName m <$> f n
 
 ------------------------------------------------------------------------
@@ -436,7 +436,7 @@ instance SetRange ModuleName where
 
 instance KillRange Name where
   killRange (Name a b c d e f) =
-    (killRange6 Name a b c d e f) { nameBindingSite = d }
+    (killRangeN Name a b c d e f) { nameBindingSite = d }
     -- Andreas, 2017-07-25, issue #2649
     -- Preserve the nameBindingSite for error message.
     --
@@ -454,7 +454,7 @@ instance KillRange ModuleName where
   killRange (MName xs) = MName $ killRange xs
 
 instance KillRange QName where
-  killRange (QName a b) = killRange2 QName a b
+  killRange (QName a b) = killRangeN QName a b
   -- killRange q = q { qnameModule = killRange $ qnameModule q
   --                 , qnameName   = killRange $ qnameName   q
   --                 }
@@ -468,9 +468,11 @@ instance KillRange AmbiguousQName where
 
 instance Sized QName where
   size = size . qnameToList
+  natSize = natSize . qnameToList
 
 instance Sized ModuleName where
   size = size . mnameToList
+  natSize = natSize . mnameToList
 
 ------------------------------------------------------------------------
 -- * NFData instances

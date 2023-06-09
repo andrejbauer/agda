@@ -57,6 +57,8 @@ data Where
   | MetaArg          -- ^ as an argument of a metavariable
   | ConArgType QName -- ^ in the type of a constructor
   | IndArgType QName -- ^ in a datatype index of a constructor
+  | ConEndpoint QName
+                     -- ^ in an endpoint of a higher constructor
   | InClause Nat     -- ^ in the nth clause of a defined function
   | Matched          -- ^ matched against in a clause of a defined function
   | IsIndex          -- ^ is an index of an inductive family
@@ -98,6 +100,8 @@ instance Pretty Where where
     MetaArg      -> "MetaArg"
     ConArgType q -> "ConArgType" <+> pretty q
     IndArgType q -> "IndArgType" <+> pretty q
+    ConEndpoint q
+                 -> "ConEndpoint" <+> pretty q
     InClause i   -> "InClause"   <+> pretty i
     Matched      -> "Matched"
     IsIndex      -> "IsIndex"
@@ -171,7 +175,8 @@ instance Null Occurrence where
 -- Agda.TypeChecking.Positivity.
 
 instance Sized OccursWhere where
-  size (OccursWhere _ cs os) = 1 + size cs + size os
+  size    (OccursWhere _ cs os) = 1 + size cs + size os
+  natSize (OccursWhere _ cs os) = 1 + natSize cs + natSize os
 
 -- | The map contains bindings of the form @bound |-> ess@, satisfying
 -- the following property: for every non-empty list @w@,

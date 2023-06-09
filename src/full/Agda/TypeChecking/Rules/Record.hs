@@ -2,7 +2,7 @@
 
 module Agda.TypeChecking.Rules.Record where
 
-import Prelude hiding (null)
+import Prelude hiding (null, not, (&&), (||))
 
 import Control.Monad
 import Data.Maybe
@@ -28,7 +28,6 @@ import Agda.TypeChecking.Positivity.Occurrence
 import Agda.TypeChecking.Pretty
 import Agda.TypeChecking.Polarity
 import Agda.TypeChecking.Warnings
-import Agda.TypeChecking.Irrelevance
 import Agda.TypeChecking.CompiledClause (hasProjectionPatterns)
 import Agda.TypeChecking.CompiledClause.Compile
 
@@ -40,6 +39,8 @@ import Agda.TypeChecking.Rules.Data
 import Agda.TypeChecking.Rules.Term ( isType_ )
 import {-# SOURCE #-} Agda.TypeChecking.Rules.Decl (checkDecl)
 
+import Agda.Utils.Boolean
+import Agda.Utils.Function ( applyWhen )
 import Agda.Utils.List (headWithDefault)
 import Agda.Utils.Maybe
 import Agda.Utils.Monad
@@ -103,6 +104,10 @@ checkRecDef i name uc (RecordDirectives ind eta0 pat con) (A.DataDefParams gpars
           case theDef def of
             DataOrRecSig n -> n
             _              -> __IMPOSSIBLE__
+
+    -- If the record type is erased, then hard compile-time mode is
+    -- entered.
+    setHardCompileTimeModeIfErased' def $ do
 
     parNames <- getGeneralizedParameters gpars name
 
@@ -209,9 +214,8 @@ checkRecDef i name uc (RecordDirectives ind eta0 pat con) (A.DataDefParams gpars
       -- Jesper, 2021-05-26: Warn when declaring coinductive record
       -- but neither --guardedness nor --sized-types is enabled.
       when (conInduction == CoInductive) $ do
-        guardedness <- collapseDefault . optGuardedness <$> pragmaOptions
-        sizedTypes  <- collapseDefault . optSizedTypes  <$> pragmaOptions
-        unless (guardedness || sizedTypes) $ warning $ NoGuardednessFlag name
+        unlessM ((optGuardedness || optSizedTypes) <$> pragmaOptions) $
+          warning $ NoGuardednessFlag name
 
       -- Add the record definition.
 
@@ -244,10 +248,12 @@ checkRecDef i name uc (RecordDirectives ind eta0 pat con) (A.DataDefParams gpars
               , recComp           = emptyCompKit -- filled in later
               }
 
+        erasure <- optErasure <$> pragmaOptions
         -- Add record constructor to signature
         addConstant' conName defaultArgInfo conName
-             -- The parameters are erased in the constructor's type.
-            (fmap (applyQuantity zeroQuantity) telh
+             -- If --erasure is used, then the parameters are erased
+             -- in the constructor's type.
+            (applyWhen erasure (fmap $ applyQuantity zeroQuantity) telh
              `abstract` contype) $
             Constructor
               { conPars   = npars
@@ -255,11 +261,11 @@ checkRecDef i name uc (RecordDirectives ind eta0 pat con) (A.DataDefParams gpars
               , conSrcCon = con
               , conData   = name
               , conAbstr  = Info.defAbstract i
-              , conInd    = conInduction
               , conComp   = emptyCompKit  -- filled in later
               , conProj   = Nothing       -- filled in later
               , conForced = []
               , conErased = Nothing
+              , conErasure = erasure
               }
 
       -- Declare the constructor as eligible for instance search
@@ -348,8 +354,10 @@ checkRecDef i name uc (RecordDirectives ind eta0 pat con) (A.DataDefParams gpars
       -- For checking the record declarations, hide the record parameters
       -- and the parameters of the parent modules.
       modifyContextInfo (hideOrKeepInstance . maybeErase) $ do
-        -- The parameters are erased in the types of the projections.
-        params <- fmap (applyQuantity zeroQuantity) <$> getContext
+        -- If --erasure is used, then the parameters are erased in the
+        -- types of the projections.
+        erasure <- optErasure <$> pragmaOptions
+        params  <- applyWhen erasure (fmap $ applyQuantity zeroQuantity) <$> getContext
 
         -- Check the types of the fields and the other record declarations.
         addRecordVar $ withCurrentModule m $ do
@@ -368,7 +376,7 @@ checkRecDef i name uc (RecordDirectives ind eta0 pat con) (A.DataDefParams gpars
 
       -- we define composition here so that the projections are already in the signature.
       escapeContext impossible npars $ do
-        addCompositionForRecord name con tel (map argFromDom fs) ftel rect
+        addCompositionForRecord name haveEta con tel (map argFromDom fs) ftel rect
 
       -- The confluence checker needs to know what symbols match against
       -- the constructor.
@@ -386,13 +394,14 @@ checkRecDef i name uc (RecordDirectives ind eta0 pat con) (A.DataDefParams gpars
 
 addCompositionForRecord
   :: QName       -- ^ Datatype name.
+  -> EtaEquality
   -> ConHead
   -> Telescope   -- ^ @Γ@ parameters.
   -> [Arg QName] -- ^ Projection names.
   -> Telescope   -- ^ @Γ ⊢ Φ@ field types.
   -> Type        -- ^ @Γ ⊢ T@ target type.
   -> TCM ()
-addCompositionForRecord name con tel fs ftel rect = do
+addCompositionForRecord name eta con tel fs ftel rect = do
   cxt <- getContextTelescope
   inTopContext $ do
 
@@ -401,6 +410,15 @@ addCompositionForRecord name con tel fs ftel rect = do
       kit <- defineCompData name con (abstract cxt tel) [] ftel rect []
       modifySignature $ updateDefinition (conName con) $ updateTheDef $ \case
         r@Constructor{} -> r { conComp = kit, conProj = Just [] }  -- no projections
+        _ -> __IMPOSSIBLE__
+
+    -- No-eta record with pattern matching (i.e., withOUT copattern
+    -- matching): define composition as for a data type, attach it to
+    -- the record.
+    else if theEtaEquality eta == NoEta PatternMatching then do
+      kit <- defineCompData name con (abstract cxt tel) (unArg <$> fs) ftel rect []
+      modifySignature $ updateDefinition name $ updateTheDef $ \case
+        r@Record{} -> r { recComp = kit }
         _ -> __IMPOSSIBLE__
 
     -- Record has fields: attach composition data to record type
@@ -424,14 +442,14 @@ defineCompKitR ::
   -> TCM CompKit
 defineCompKitR name params fsT fns rect = do
   required <- mapM getTerm'
-        [ builtinInterval
-        , builtinIZero
-        , builtinIOne
-        , builtinIMin
-        , builtinIMax
-        , builtinINeg
-        , builtinPOr
-        , builtinItIsOne
+        [ someBuiltin builtinInterval
+        , someBuiltin builtinIZero
+        , someBuiltin builtinIOne
+        , someBuiltin builtinIMin
+        , someBuiltin builtinIMax
+        , someBuiltin builtinINeg
+        , someBuiltin builtinPOr
+        , someBuiltin builtinItIsOne
         ]
   reportSDoc "tc.rec.cxt" 30 $ prettyTCM params
   reportSDoc "tc.rec.cxt" 30 $ prettyTCM fsT
@@ -558,7 +576,7 @@ defineKanOperationR cmd name params fsT fns rect = do
 
     [@con@  ]  name of the record constructor
 
-    [@tel@  ]  parameters (erased) and record variable r ("self")
+    [@tel@  ]  parameters (perhaps erased) and record variable r ("self")
 
     [@ftel@ ]  telescope of fields
 
@@ -748,9 +766,18 @@ checkRecordProjections m r hasNamedCon con tel ftel fs = do
 
         escapeContext impossible (size tel) $ do
           lang <- getLanguage
+          fun  <- emptyFunctionData
+          let -- It should be fine to mark a field with @ω in an
+              -- erased record type: the field will be non-erased, but
+              -- the projection will be erased. The following code
+              -- ensures that the use of addConstant does not trigger
+              -- a PlentyInHardCompileTimeMode warning.
+              ai' = flip mapQuantity ai $ \case
+                      Quantityω _ -> Quantityω QωInferred
+                      q           -> q
           addConstant projname $
-            (defaultDefn ai projname (killRange finalt) lang $ FunctionDefn
-              emptyFunctionData
+            (defaultDefn ai' projname (killRange finalt) lang $ FunctionDefn
+              fun
                 { _funClauses        = [clause]
                 , _funCompiled       = Just cc
                 , _funSplitTree      = mst

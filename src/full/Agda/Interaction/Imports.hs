@@ -46,6 +46,7 @@ import qualified Data.HashMap.Strict as HMap
 import qualified Data.HashSet as HSet
 import Data.Set (Set)
 import qualified Data.Set as Set
+import qualified Data.Sequence as Seq
 import Data.Text (Text)
 import qualified Data.Text.Lazy as TL
 
@@ -125,24 +126,25 @@ data Source = Source
   , srcModule      :: C.Module              -- ^ The parsed module.
   , srcModuleName  :: TopLevelModuleName    -- ^ The top-level module name.
   , srcProjectLibs :: [AgdaLibFile]         -- ^ The .agda-lib file(s) of the project this file belongs to.
-  , srcCohesion    :: !CohesionAttributes
-    -- ^ Every encountered occurrence of a cohesion attribute.
+  , srcAttributes  :: !Attributes
+    -- ^ Every encountered attribute.
   }
 
 -- | Parses a source file and prepares the 'Source' record.
 
 parseSource :: SourceFile -> TCM Source
 parseSource sourceFile@(SourceFile f) = Bench.billTo [Bench.Parsing] $ do
-  (source, fileType, parsedMod, coh, parsedModName) <- mdo
+  (source, fileType, parsedMod, attrs, parsedModName) <- mdo
     -- This piece of code uses mdo because the top-level module name
     -- (parsedModName) is obtained from the parser's result, but it is
     -- also used by the parser.
     let rf = mkRangeFile f (Just parsedModName)
-    source                       <- runPM $ readFilePM rf
-    ((parsedMod, coh), fileType) <- runPM $ parseFile moduleParser rf $
-                                    TL.unpack source
-    parsedModName                <- moduleName f parsedMod
-    return (source, fileType, parsedMod, coh, parsedModName)
+    source                         <- runPM $ readFilePM rf
+    ((parsedMod, attrs), fileType) <- runPM $
+                                      parseFile moduleParser rf $
+                                      TL.unpack source
+    parsedModName                  <- moduleName f parsedMod
+    return (source, fileType, parsedMod, attrs, parsedModName)
   libs <- getAgdaLibFiles f parsedModName
   return Source
     { srcText        = source
@@ -151,7 +153,7 @@ parseSource sourceFile@(SourceFile f) = Bench.billTo [Bench.Parsing] $ do
     , srcModule      = parsedMod
     , srcModuleName  = parsedModName
     , srcProjectLibs = libs
-    , srcCohesion    = coh
+    , srcAttributes  = attrs
     }
 
 srcDefaultPragmas :: Source -> [OptionsPragma]
@@ -161,17 +163,19 @@ srcFilePragmas :: Source -> [OptionsPragma]
 srcFilePragmas src = pragmas
   where
   cpragmas = C.modPragmas (srcModule src)
-  pragmas = [ opts | C.OptionsPragma _ opts <- cpragmas ]
-
-srcPragmas :: Source -> [OptionsPragma]
-srcPragmas src = srcDefaultPragmas src ++ srcFilePragmas src
+  pragmas = [ OptionsPragma
+                { pragmaStrings = opts
+                , pragmaRange   = r
+                }
+            | C.OptionsPragma r opts <- cpragmas
+            ]
 
 -- | Set options from a 'Source' pragma, using the source
 --   ranges of the pragmas for error reporting.
 setOptionsFromSourcePragmas :: Source -> TCM ()
-setOptionsFromSourcePragmas src =
-  setCurrentRange (C.modPragmas . srcModule $ src) $
-    mapM_ setOptionsFromPragma (srcPragmas src)
+setOptionsFromSourcePragmas src = do
+  mapM_ setOptionsFromPragma (srcDefaultPragmas src)
+  mapM_ setOptionsFromPragma (srcFilePragmas    src)
 
 -- | Is the aim to type-check the top-level module, or only to
 -- scope-check it?
@@ -224,7 +228,7 @@ mergeInterface i = do
     reportSLn "import.iface.merge" 20 $
       "  Current builtins " ++ show (Map.keys bs) ++ "\n" ++
       "  New builtins     " ++ show (Map.keys bi)
-    let check b (Builtin x) (Builtin y)
+    let check (BuiltinName b) (Builtin x) (Builtin y)
               | x == y    = return ()
               | otherwise = typeError $ DuplicateBuiltinBinding b x y
         check _ (BuiltinRewriteRelations xs) (BuiltinRewriteRelations ys) = return ()
@@ -239,6 +243,8 @@ mergeInterface i = do
       (iUserWarnings i)
       (iPartialDefs i)
       warns
+      (iOpaqueBlocks i)
+      (iOpaqueNames i)
     reportSLn "import.iface.merge" 20 $
       "  Rebinding primitives " ++ show prim
     mapM_ rebind prim
@@ -248,7 +254,7 @@ mergeInterface i = do
     where
         rebind (x, q) = do
             PrimImpl _ pf <- lookupPrimitiveFunction x
-            stImportedBuiltins `modifyTCLens` Map.insert x (Prim pf{ primFunName = q })
+            stImportedBuiltins `modifyTCLens` Map.insert (someBuiltin x) (Prim pf{ primFunName = q })
 
 addImportedThings
   :: Signature
@@ -259,9 +265,11 @@ addImportedThings
   -> Map A.QName Text      -- ^ Imported user warnings
   -> Set QName             -- ^ Name of imported definitions which are partial
   -> [TCWarning]
+  -> Map OpaqueId OpaqueBlock
+  -> Map QName OpaqueId
   -> TCM ()
 addImportedThings isig metas ibuiltin patsyns display userwarn
-                  partialdefs warnings = do
+                  partialdefs warnings oblock oid = do
   stImports              `modifyTCLens` \ imp -> unionSignatures [imp, isig]
   stImportedMetaStore    `modifyTCLens` HMap.union metas
   stImportedBuiltins     `modifyTCLens` \ imp -> Map.union imp ibuiltin
@@ -270,6 +278,8 @@ addImportedThings isig metas ibuiltin patsyns display userwarn
   stPatternSynImports    `modifyTCLens` \ imp -> Map.union imp patsyns
   stImportedDisplayForms `modifyTCLens` \ imp -> HMap.unionWith (++) imp display
   stTCWarnings           `modifyTCLens` \ imp -> imp `List.union` warnings
+  stOpaqueBlocks         `modifyTCLens` \ imp -> imp `Map.union` oblock
+  stOpaqueIds            `modifyTCLens` \ imp -> imp `Map.union` oid
   addImportedInstances isig
 
 -- | Scope checks the given module. A proper version of the module
@@ -776,6 +786,8 @@ createInterfaceIsolated x file msrc = do
       display     <- useTC stImportsDisplayForms
       userwarn    <- useTC stImportedUserWarnings
       partialdefs <- useTC stImportedPartialDefs
+      opaqueblk   <- useTC stOpaqueBlocks
+      opaqueid    <- useTC stOpaqueIds
       ipatsyns <- getPatternSynImports
       ho       <- getInteractionOutputCallback
       -- Every interface is treated in isolation. Note: Some changes to
@@ -802,7 +814,7 @@ createInterfaceIsolated x file msrc = do
                stModuleToSource `setTCLens` mf
                setVisitedModules vs
                addImportedThings isig metas ibuiltin ipatsyns display
-                 userwarn partialdefs []
+                 userwarn partialdefs [] opaqueblk opaqueid
 
                r  <- createInterface x file NotMainInterface msrc
                mf' <- useTC stModuleToSource
@@ -839,9 +851,15 @@ chaseMsg
   -> TCM ()
 chaseMsg kind x file = do
   indentation <- (`replicate` ' ') <$> asksTC (pred . length . envImportPath)
+  traceImports <- optTraceImports <$> commandLineOptions
   let maybeFile = caseMaybe file "." $ \ f -> " (" ++ f ++ ")."
-      vLvl | kind == "Checking" = 1
-           | otherwise          = 2
+      vLvl | kind == "Checking"
+             && traceImports > 0 = 1
+           | kind == "Finished"
+             && traceImports > 1 = 1
+           | List.isPrefixOf "Loading" kind
+             && traceImports > 2 = 1
+           | otherwise = 2
   reportSLn "import.chase" vLvl $ concat
     [ indentation, kind, " ", prettyShow x, maybeFile ]
 
@@ -977,7 +995,7 @@ createInterface mname file isMain msrc = do
     stTokens `modifyTCLens` (fileTokenInfo <>)
 
     setOptionsFromSourcePragmas src
-    checkCohesionAttributes (srcCohesion src)
+    checkAttributes (srcAttributes src)
     syntactic <- optSyntacticEquality <$> pragmaOptions
     localTC (\env -> env { envSyntacticEqualityFuel = syntactic }) $ do
 
@@ -1175,7 +1193,7 @@ createInterface mname file isMain msrc = do
 -- 'MainInterface', the warnings definitely include also unsolved
 -- warnings.
 
-getAllWarnings' :: (MonadFail m, ReadTCState m, MonadWarning m) => MainInterface -> WhichWarnings -> m [TCWarning]
+getAllWarnings' :: (MonadFail m, ReadTCState m, MonadWarning m, MonadTCM m) => MainInterface -> WhichWarnings -> m [TCWarning]
 getAllWarnings' (MainInterface _) = getAllWarningsPreserving unsolvedWarnings
 getAllWarnings' NotMainInterface  = getAllWarningsPreserving Set.empty
 
@@ -1234,11 +1252,20 @@ buildInterface src topLevel = do
     optionsUsed <- useTC stPragmaOptions
     partialDefs <- useTC stLocalPartialDefs
 
+    -- Only serialise the opaque blocks actually defined in this
+    -- top-level module.
+    opaqueBlocks' <- useTC stOpaqueBlocks
+    opaqueIds' <- useTC stOpaqueIds
+    let
+      mh = moduleNameId (srcModuleName src)
+      opaqueBlocks = Map.filterWithKey (\(OpaqueId _ mod) _ -> mod == mh) opaqueBlocks'
+      opaqueIds    = Map.filterWithKey (\_ (OpaqueId _ mod) -> mod == mh) opaqueIds'
+
     -- Andreas, 2015-02-09 kill ranges in pattern synonyms before
     -- serialization to avoid error locations pointing to external files
     -- when expanding a pattern synonym.
     patsyns <- killRange <$> getPatternSyns
-    let builtin' = Map.mapWithKey (\ x b -> (x,) . primFunName <$> b) builtin
+    let builtin' = Map.mapWithKey (\ x b -> primName x <$> b) builtin
     warnings <- getAllWarnings AllWarnings
     let i = Interface
           { iSourceHash      = hashText source
@@ -1263,9 +1290,11 @@ buildInterface src topLevel = do
           , iPatternSyns     = patsyns
           , iWarnings        = warnings
           , iPartialDefs     = partialDefs
+          , iOpaqueBlocks    = opaqueBlocks
+          , iOpaqueNames     = opaqueIds
           }
     i <-
-      ifM (collapseDefault . optSaveMetas <$> pragmaOptions)
+      ifM (optSaveMetas <$> pragmaOptions)
         (return i)
         (do reportSLn "import.iface" 7
               "  instantiating all meta variables"
@@ -1275,6 +1304,10 @@ buildInterface src topLevel = do
             instantiateFullExceptForDefinitions i)
     reportSLn "import.iface" 7 "  interface complete"
     return i
+
+    where
+      primName (PrimitiveName x) b = (x, primFunName b)
+      primName (BuiltinName x)   b = __IMPOSSIBLE__
 
 -- | Returns (iSourceHash, iFullHash)
 --   We do not need to check that the file exist because we only

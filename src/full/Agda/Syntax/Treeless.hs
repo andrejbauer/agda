@@ -47,7 +47,7 @@ type Args = [TTerm]
 -- this currently assumes that TApp is translated in a lazy/cbn fashion.
 -- The AST should also support strict translation.
 --
--- All local variables are using de Bruijn indices.
+-- | Treeless Term. All local variables are using de Bruijn indices.
 data TTerm = TVar Int
            | TPrim TPrim
            | TDef QName
@@ -56,7 +56,7 @@ data TTerm = TVar Int
            | TLit Literal
            | TCon QName
            | TLet TTerm TTerm
-           -- ^ introduces a new local binding. The bound term
+           -- ^ introduces a new (non-recursive) local binding. The bound term
            -- MUST only be evaluated if it is used inside the body.
            -- Sharing may happen, but is optional.
            -- It is also perfectly valid to just inline the bound term in the body.
@@ -194,9 +194,8 @@ tIfThenElse :: TTerm -> TTerm -> TTerm -> TTerm
 tIfThenElse c i e = TApp (TPrim PIf) [c, i, e]
 
 data CaseType
-  = CTData Quantity QName
-    -- Case on datatype. The 'Quantity' is zero for matches on erased
-    -- arguments.
+  = CTData QName
+    -- Case on datatype.
   | CTNat
   | CTInt
   | CTChar
@@ -207,6 +206,8 @@ data CaseType
 
 data CaseInfo = CaseInfo
   { caseLazy :: Bool
+  , caseErased :: Erased
+    -- ^ Is this a match on an erased argument?
   , caseType :: CaseType }
   deriving (Show, Eq, Ord, Generic)
 
@@ -217,6 +218,9 @@ data TAlt
   -- (pushes all existing variables aArity steps further away)
   | TAGuard  { aGuard :: TTerm, aBody :: TTerm }
   -- ^ Binds no variables
+  --
+  -- The guard must only use the variable that the case expression
+  -- matches on.
   | TALit    { aLit :: Literal,   aBody:: TTerm }
   deriving (Show, Eq, Ord, Generic)
 

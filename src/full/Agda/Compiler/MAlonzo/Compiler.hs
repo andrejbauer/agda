@@ -278,15 +278,21 @@ ghcPreCompile flags = do
       , builtinAgdaTCMCommit
       , builtinAgdaTCMIsMacro
       , builtinAgdaTCMWithNormalisation
-      , builtinAgdaTCMWithReconsParams
+      , builtinAgdaTCMWithReconstructed
+      , builtinAgdaTCMWithExpandLast
+      , builtinAgdaTCMWithReduceDefs
+      , builtinAgdaTCMAskNormalisation
+      , builtinAgdaTCMAskReconstructed
+      , builtinAgdaTCMAskExpandLast
+      , builtinAgdaTCMAskReduceDefs
       , builtinAgdaTCMFormatErrorParts
       , builtinAgdaTCMDebugPrint
-      , builtinAgdaTCMOnlyReduceDefs
-      , builtinAgdaTCMDontReduceDefs
       , builtinAgdaTCMNoConstraints
       , builtinAgdaTCMRunSpeculative
       , builtinAgdaTCMExec
       , builtinAgdaTCMGetInstances
+      , builtinAgdaTCMPragmaForeign
+      , builtinAgdaTCMPragmaCompile
       ]
     return $
       flip HashSet.member $
@@ -522,7 +528,7 @@ definition def@Defn{defName = q, defType = ty, theDef = d} = do
 
       -- Compiling Bool
       Datatype{} | is ghcEnvBool -> do
-        _ <- sequence_ [primTrue, primFalse] -- Just to get the proper error for missing TRUE/FALSE
+        sequence_ [primTrue, primFalse] -- Just to get the proper error for missing TRUE/FALSE
         let d = dname q
         Just true  <- getBuiltinName builtinTrue
         Just false <- getBuiltinName builtinFalse
@@ -533,7 +539,7 @@ definition def@Defn{defName = q, defType = ty, theDef = d} = do
 
       -- Compiling List
       Datatype{ dataPars = np } | is ghcEnvList -> do
-        _ <- sequence_ [primNil, primCons] -- Just to get the proper error for missing NIL/CONS
+        sequence_ [primNil, primCons] -- Just to get the proper error for missing NIL/CONS
         caseMaybe pragma (return ()) $ \ p -> setCurrentRange p $ warning . GenericWarning =<< do
           fsep $ pwords "Ignoring GHC pragma for builtin lists; they always compile to Haskell lists."
         let d = dname q
@@ -548,7 +554,7 @@ definition def@Defn{defName = q, defType = ty, theDef = d} = do
 
       -- Compiling Maybe
       Datatype{ dataPars = np } | is ghcEnvMaybe -> do
-        _ <- sequence_ [primNothing, primJust] -- Just to get the proper error for missing NOTHING/JUST
+        sequence_ [primNothing, primJust] -- Just to get the proper error for missing NOTHING/JUST
         caseMaybe pragma (return ()) $ \ p -> setCurrentRange p $ warning . GenericWarning =<< do
           fsep $ pwords "Ignoring GHC pragma for builtin maybe; they always compile to Haskell lists."
         let d = dname q
@@ -578,7 +584,7 @@ definition def@Defn{defName = q, defType = ty, theDef = d} = do
       -- The interval is compiled as the type of booleans: 0 is
       -- compiled as False and 1 as True.
       Axiom{} | is ghcEnvInterval -> do
-        _       <- sequence_ [primIZero, primIOne]
+        sequence_ [primIZero, primIOne]
         Just i0 <- getBuiltinName builtinIZero
         Just i1 <- getBuiltinName builtinIOne
         cs      <- mapM (compiledcondecl (Just 0)) [i0, i1]
@@ -631,7 +637,7 @@ definition def@Defn{defName = q, defType = ty, theDef = d} = do
       -- PathP is compiled as a function from the interval (booleans)
       -- to the underlying type.
       Axiom{} | is ghcEnvPathP -> do
-        _        <- sequence_ [primInterval]
+        sequence_ [primInterval]
         Just int <- getBuiltinName builtinInterval
         int      <- xhqn TypeK int
         retDecls $
@@ -668,7 +674,7 @@ definition def@Defn{defName = q, defType = ty, theDef = d} = do
       -- Id x y is compiled as a pair of a boolean and whatever
       -- Path x y is compiled to.
       Datatype{} | is ghcEnvId -> do
-        _        <- sequence_ [primInterval]
+        sequence_ [primInterval]
         Just int <- getBuiltinName builtinInterval
         int      <- xhqn TypeK int
         -- re  #3733: implement reflId
@@ -686,7 +692,7 @@ definition def@Defn{defName = q, defType = ty, theDef = d} = do
       -- conid.
       Primitive{} | is ghcEnvConId -> do
         strict <- optGhcStrictData <$> askGhcOpts
-        let var = (if strict then HS.PBangPat else id) . HS.PVar
+        let var = applyWhen strict HS.PBangPat . HS.PVar
         retDecls $
           [ HS.FunBind
               [HS.Match (dname q)
@@ -860,10 +866,10 @@ data CCEnv = CCEnv
 type NameSupply = [HS.Name]
 type CCContext  = [HS.Name]
 
-ccNameSupply :: Lens' NameSupply CCEnv
+ccNameSupply :: Lens' CCEnv NameSupply
 ccNameSupply f e =  (\ ns' -> e { _ccNameSupply = ns' }) <$> f (_ccNameSupply e)
 
-ccContext :: Lens' CCContext CCEnv
+ccContext :: Lens' CCEnv CCContext
 ccContext f e = (\ cxt -> e { _ccContext = cxt }) <$> f (_ccContext e)
 
 -- | Initial environment for expression generation.
@@ -1074,7 +1080,10 @@ alt sc a = do
     mkAlt :: HS.Pat -> CC HS.Alt
     mkAlt pat = do
         body' <- term $ T.aBody a
-        return $ HS.Alt pat (HS.UnGuardedRhs body') emptyBinds
+        let body'' = case body' of
+                       HS.Lambda{} -> hsCoerce body'
+                       _           -> body'
+        return $ HS.Alt pat (HS.UnGuardedRhs body'') emptyBinds
 
 literal :: forall m. Monad m => Literal -> CCT m HS.Exp
 literal l = case l of
@@ -1161,9 +1170,9 @@ condecl :: QName -> Induction -> HsCompileM HS.ConDecl
 condecl q _ind = do
   opts <- askGhcOpts
   def <- getConstInfo q
-  let Constructor{ conPars = np, conErased = erased } = theDef def
+  let Constructor{ conPars = np, conSrcCon, conErased = erased } = theDef def
   (argTypes0, _) <- hsTelApproximation (defType def)
-  let strict     = if conInd (theDef def) == Inductive &&
+  let strict     = if conInductive conSrcCon == Inductive &&
                       optGhcStrictData opts
                    then HS.Strict
                    else HS.Lazy

@@ -75,12 +75,11 @@ instance GetDefs Type where
 
 instance GetDefs Sort where
   getDefs = \case
-    Type l    -> getDefs l
-    Prop l    -> getDefs l
+    Univ _ l  -> getDefs l
     Inf _ _   -> return ()
-    SSet l    -> getDefs l
     SizeUniv  -> return ()
     LockUniv  -> return ()
+    LevelUniv -> return ()
     IntervalUniv -> return ()
     PiSort a s1 s2 -> getDefs a >> getDefs s1 >> getDefs s2
     FunSort s1 s2 -> getDefs s1 >> getDefs s2

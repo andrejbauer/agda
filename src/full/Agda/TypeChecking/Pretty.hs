@@ -53,9 +53,10 @@ import Agda.Utils.List1 ( List1, pattern (:|) )
 import qualified Agda.Utils.List1 as List1
 import Agda.Utils.Maybe
 import Agda.Utils.Null
-import Agda.Utils.Permutation (Permutation)
-import Agda.Utils.Pretty (Pretty, prettyShow)
+import Agda.Utils.Permutation ( Permutation )
+import Agda.Utils.Pretty      ( Pretty, prettyShow )
 import qualified Agda.Utils.Pretty as P
+import Agda.Utils.Size        ( natSize )
 
 import Agda.Utils.Impossible
 
@@ -297,6 +298,9 @@ instance PrettyTCM Relevance where
 instance PrettyTCM Quantity where
   prettyTCM = pretty
 
+instance PrettyTCM Erased where
+  prettyTCM = pretty
+
 instance PrettyTCM Modality where
   prettyTCM mod = hsep
     [ prettyTCM (getQuantity mod)
@@ -326,7 +330,7 @@ instance PrettyTCM TypeCheckingProblem where
   prettyTCM (CheckLambda cmp (Arg ai (xs, mt)) e t) =
     sep [ pure CP.lambda <+>
           (CP.prettyRelevance ai .
-           CP.prettyHiding ai (if isNothing mt && length xs == 1 then id
+           CP.prettyHiding ai (if isNothing mt && natSize xs == 1 then id
                                else P.parens) <$> do
             fsep $
               map prettyTCM (List1.toList xs) ++
@@ -430,12 +434,12 @@ instance PrettyTCM NLPType where
 
 instance PrettyTCM NLPSort where
   prettyTCM = \case
-    PType l   -> parens $ "Set" <+> prettyTCM l
-    PProp l   -> parens $ "Prop" <+> prettyTCM l
-    PSSet l   -> parens $ "SSet" <+> prettyTCM l
-    PInf f n  -> prettyTCM (Inf f n :: Sort)
+    PUniv u l -> parens $ text (showUniv u) <+> prettyTCM l
+      -- Andreas, 2023-05-11, preserving Jesper's printing hack for now...
+    PInf u n  -> prettyTCM (Inf u n :: Sort)
     PSizeUniv -> prettyTCM (SizeUniv :: Sort)
     PLockUniv -> prettyTCM (LockUniv :: Sort)
+    PLevelUniv -> prettyTCM (LevelUniv :: Sort)
     PIntervalUniv -> prettyTCM (IntervalUniv :: Sort)
 
 instance PrettyTCM (Elim' NLPat) where

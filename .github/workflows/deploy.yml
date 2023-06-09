@@ -78,32 +78,60 @@ jobs:
     - id: setup-haskell
       uses: haskell/actions/setup@v2
       with:
-        cabal-version: ${{ matrix.cabal-ver }}
+        cabal-version: latest
         ghc-version: ${{ matrix.ghc-ver }}
-    - if: ${{ runner.os == 'macOS' }}
-      name: Set up pkg-config for the ICU library (macOS)
+    - name: Environment settings based on the Haskell setup
       run: |
-        echo "PKG_CONFIG_PATH=/usr/local/opt/icu4c/lib/pkgconfig" >> ${GITHUB_ENV}
+        GHC_VER=$(ghc --numeric-version)
+        CABAL_VER=$(cabal --numeric-version)
+        echo "GHC_VER   = ${GHC_VER}"
+        echo "CABAL_VER = ${CABAL_VER}"
+        echo "GHC_VER=${GHC_VER}"       >> "${GITHUB_ENV}"
+        echo "CABAL_VER=${CABAL_VER}"   >> "${GITHUB_ENV}"
     - if: ${{ runner.os == 'Windows' }}
-      name: Setup MSYS path (Windows)
+      name: Install the ICU library (Windows)
       run: |
-        echo "C:\msys64\mingw64\bin;C:\msys64\usr\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
-      shell: pwsh
-    - if: ${{ runner.os == 'Windows' }}
-      name: Install the icu4c library (Windows)
-      run: |
+        $env:PATH = "C:\msys64\usr\bin;$env:PATH"
         pacman -v --noconfirm -Sy mingw-w64-x86_64-pkg-config mingw-w64-x86_64-icu
+        echo "C:\msys64\mingw64\bin" | Out-File -FilePath "$env:GITHUB_PATH" -Append
+      shell: pwsh
+    - if: ${{ runner.os == 'macOS' }}
+      name: Set up for the ICU library (macOS)
+      run: |
+        ICU4C=$(brew --prefix)/opt/icu4c
+        # echo "${ICU4C}/bin" >> "${GITHUB_PATH}" ## Only needed for uconv
+        ICU_DIR=${ICU4C}/lib
+        echo "ICU_DIR=${ICU_DIR}"
+        echo "ICU_DIR=${ICU_DIR}" >> "${GITHUB_ENV}"
+        echo "PKG_CONFIG_PATH=${ICU_DIR}/pkgconfig" >> "${GITHUB_ENV}"
+    - name: Determine the ICU version
+      run: |
+        ICU_VER=$(pkg-config --modversion icu-i18n)
+        echo "ICU_VER=${ICU_VER}"
+        echo "ICU_VER=${ICU_VER}" >> "${GITHUB_ENV}"
+        ICU_MAJOR_VER=$(cut -d '.' -f 1 <<< "${ICU_VER}")
+        echo "ICU_MAJOR_VER=${ICU_MAJOR_VER}"
+        echo "ICU_MAJOR_VER=${ICU_MAJOR_VER}" >> "${GITHUB_ENV}"
     - name: Configure the build plan
       run: |
         cabal configure ${{ steps.vars.outputs.args }}
-    - name: Build dependencies
+        cabal build --dry-run
+    - id: cache
+      name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        key: deploy.yml-${{ runner.os }}-ghc-${{ env.GHC_VER }}-cabal-${{ env.CABAL_VER
+          }}-${{ hashFiles('**/plan.json') }}
+        path: ${{ steps.setup-haskell.outputs.cabal-store }}
+        restore-keys: deploy.yml-${{ runner.os }}-ghc-${{ env.GHC_VER }}-cabal-${{
+          env.CABAL_VER }}-
+    - if: ${{ !steps.cache.outputs.cache-hit }}
+      name: Build dependencies
       run: cabal build exe:agda exe:agda-mode --only-dependencies
     - name: Build Agda
       run: cabal build exe:agda exe:agda-mode
     - env:
         DLL: /c/msys64/mingw64/bin/libicu*.dll
-        ICU_DIR: /usr/local/opt/icu4c/lib
-        ICU_VER: '71'
       name: Move artefacts to ${{ steps.vars.outputs.nightly }}
       run: |
         nightly="${{ steps.vars.outputs.nightly }}"
@@ -132,9 +160,9 @@ jobs:
           # 3. the default location of system-wide icu4c installed by homebrew, ie. /usr/local/opt/icu4c/lib
           #
           mkdir "${nightly}"/lib
-          cp ${ICU_DIR}/libicuuc.${ICU_VER}.dylib ${ICU_DIR}/libicui18n.${ICU_VER}.dylib ${ICU_DIR}/libicudata.${ICU_VER}.dylib "${nightly}"/lib
-          install_name_tool -change ${ICU_DIR}/libicuuc.${ICU_VER}.dylib @rpath/libicuuc.${ICU_VER}.dylib "${nightly}"/bin/agda
-          install_name_tool -change ${ICU_DIR}/libicui18n.${ICU_VER}.dylib @rpath/libicui18n.${ICU_VER}.dylib "${nightly}"/bin/agda
+          cp ${ICU_DIR}/libicuuc.${ICU_MAJOR_VER}.dylib ${ICU_DIR}/libicui18n.${ICU_MAJOR_VER}.dylib ${ICU_DIR}/libicudata.${ICU_MAJOR_VER}.dylib "${nightly}"/lib
+          install_name_tool -change ${ICU_DIR}/libicuuc.${ICU_MAJOR_VER}.dylib @rpath/libicuuc.${ICU_MAJOR_VER}.dylib "${nightly}"/bin/agda
+          install_name_tool -change ${ICU_DIR}/libicui18n.${ICU_MAJOR_VER}.dylib @rpath/libicui18n.${ICU_MAJOR_VER}.dylib "${nightly}"/bin/agda
           install_name_tool -add_rpath @executable_path -add_rpath @executable_path/../lib -add_rpath ${ICU_DIR} "${nightly}"/bin/agda
           otool -L "${nightly}"/bin/agda
 
@@ -163,40 +191,29 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        cabal-ver:
-        - '3.8'
         ghc-ver:
-        - '9.4'
+        - '9.6'
+        include:
+        - ghc-ver: '9.4'
+          os: ubuntu-20.04
         os:
         - windows-latest
         - macos-latest
-        - ubuntu-latest
   deploy:
-    if: ${{ github.ref == 'refs/heads/master' && github.event_name == 'workflow_run'
-      }}
+    if: ${{ github.ref == 'refs/heads/master' }}
     needs: build
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
     - uses: actions/download-artifact@v3
       with:
         path: artifacts
     - env:
         GITHUB_TOKEN: ${{ github.token }}
-      name: Delete the nightly tag if any
-      uses: dev-drprasad/delete-tag-and-release@v0.2.0
-      with:
-        delete_release: true
-        tag_name: nightly
-    - env:
-        GITHUB_TOKEN: ${{ github.token }}
-      name: Create a nightly release and upload artifacts as release assets
+      name: Create/replace the nightly release and upload artifacts as release assets
       run: |
-        assets=()
-        for asset in artifacts/**/*; do
-          assets+=("-a" "$asset")
-        done
-        hub release create "${assets[@]}" -m "Nightly Build (${{ needs.build.outputs.sha }}@master)" 'nightly'
+        gh release delete 'nightly' --repo agda/agda --cleanup-tag --yes || true
+        ls -R artifacts
+        gh release create 'nightly' artifacts/**/* --repo agda/agda --generate-notes --notes-start-tag v2.6.3 --title "Nightly Build (${{ needs.build.outputs.sha }}@master)"
 name: Deploy
 'on':
   workflow_dispatch: null

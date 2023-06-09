@@ -15,7 +15,6 @@ import Agda.Syntax.Internal.Generic
 
 import Agda.TypeChecking.Monad
 import Agda.TypeChecking.CheckInternal
-import Agda.TypeChecking.Irrelevance
 import Agda.TypeChecking.ProjectionLike
 import Agda.TypeChecking.Substitute
 import Agda.TypeChecking.Reduce
@@ -143,19 +142,23 @@ extractParameters :: QName -> Type -> TCM Args
 extractParameters q ty = reduce (unEl ty) >>= \case
   Def d prePs -> do
     dt <- defType <$> getConstInfo d
-    reportSDoc "tc.reconstruct" 50 $ "Here we start infering spine"
-    ((_,Def _ postPs),_) <- inferSpine' reconstructAction dt (Def d []) (Def d []) prePs
-    reportSDoc "tc.reconstruct" 50 $ "The spine has been inferred:" <+> pretty postPs
+    reportSDoc "tc.reconstruct" 50 $ "Start traversing parameters: " <+> pretty prePs
+    postPs <- checkInternal' reconstructAction prePs CmpEq (dt , Def d)
+    reportSDoc "tc.reconstruct" 50 $ "Traversed parameters:" <+> pretty postPs
     info <- getConstInfo q
-    let mkParam = applyQuantity zeroQuantity
-                . hideAndRelParams
-                . isApplyElim' __IMPOSSIBLE__
+    let mkParam erasure =
+            (if erasure then applyQuantity zeroQuantity else id)
+          . hideAndRelParams
+          . isApplyElim' __IMPOSSIBLE__
     if -- Case: data or record constructor
-       | Constructor{ conPars = n } <- theDef info ->
-           return $ map mkParam $ take n postPs
+       | Constructor{ conPars = n, conErasure = e } <- theDef info ->
+           return $ map (mkParam e) $ take n postPs
        -- Case: regular projection
        | isProperProjection (theDef info) ->
-           return $ map mkParam postPs
+         case theDef info of
+           Function{ funErasure = e } ->
+             return $ map (mkParam e) postPs
+           _ -> __IMPOSSIBLE__
        -- Case: projection-like function
        | otherwise -> do
            TelV tel _ <- telViewUpTo (size postPs) $ defType info

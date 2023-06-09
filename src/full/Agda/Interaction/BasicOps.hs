@@ -7,13 +7,15 @@ module Agda.Interaction.BasicOps where
 import Prelude hiding (null)
 
 import Control.Arrow          ( first )
-import Control.Monad          ( (>=>), forM, guard )
+import Control.Monad          ( (<=<), (>=>), forM, filterM, guard )
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Identity
+import Control.Monad.Trans.Maybe
 
 import qualified Data.Map as Map
+import qualified Data.IntMap as IntMap
 import qualified Data.Map.Strict as MapS
 import qualified Data.Set as Set
 import qualified Data.List as List
@@ -60,7 +62,6 @@ import Agda.TypeChecking.With
 import Agda.TypeChecking.Coverage
 import Agda.TypeChecking.Coverage.Match ( SplitPattern )
 import Agda.TypeChecking.Records
-import Agda.TypeChecking.Irrelevance (wakeIrrelevantVars)
 import Agda.TypeChecking.Pretty ( PrettyTCM, prettyTCM )
 import Agda.TypeChecking.Pretty.Constraint (prettyRangeConstraint)
 import Agda.TypeChecking.IApplyConfluence
@@ -76,6 +77,7 @@ import Agda.TypeChecking.Warnings
 
 import Agda.Termination.TermCheck (termMutual)
 
+import Agda.Utils.Function (applyWhen)
 import Agda.Utils.Functor
 import Agda.Utils.Lens
 import Agda.Utils.List
@@ -98,9 +100,9 @@ import Agda.TypeChecking.ProjectionLike (reduceProjectionLike)
 
 parseExpr :: Range -> String -> TCM C.Expr
 parseExpr rng s = do
-  (C.ExprWhere e wh, coh) <-
+  (C.ExprWhere e wh, attrs) <-
     runPM $ parsePosString exprWhereParser pos s
-  checkCohesionAttributes coh
+  checkAttributes attrs
   unless (null wh) $ typeError $ GenericError $
     "where clauses are not supported in holes"
   return e
@@ -147,9 +149,10 @@ giveExpr force mii mi e = do
       -- when not in a mutual block.
       v <- locallyTC eMutualBlock (const Nothing) $
         checkExpr e t'
+      reportSDoc "interaction.give" 40 $ "give: checked expression:" TP.<+> pure (pretty v)
       case mvInstantiation mv of
 
-        InstV{} -> unlessM ((Irrelevant ==) <$> asksTC getRelevance) $ do
+        InstV{} -> unlessM ((Irrelevant ==) <$> viewTC eRelevance) $ do
           v' <- instantiate $ MetaV mi $ map Apply ctx
           reportSDoc "interaction.give" 20 $ TP.sep
             [ "meta was already set to value v' = " TP.<+> prettyTCM v'
@@ -247,6 +250,7 @@ elaborate_give norm force ii mr e = withInteractionId ii $ do
   -- Reduce projection-likes before quoting, otherwise instance
   -- selection may fail on reload (see #6203).
   nv <- reduceProjectionLike =<< normalForm norm v
+  reportSDoc "interaction.give" 40 $ "nv = " TP.<+> pure (pretty v)
   locallyTC ePrintMetasBare (const True) $ reify nv
 
 -- | Try to refine hole by expression @e@.
@@ -609,14 +613,14 @@ instance ToConcrete a => ToConcrete (IPBoundary' a) where
 
   toConcrete = traverse (toConcreteCtx TopCtx)
 
-instance Pretty c => Pretty (IPBoundary' c) where
-  pretty (IPBoundary eqs val meta over) = do
+instance Pretty c => Pretty (IPFace' c) where
+  pretty (IPFace' eqs val) = do
     let
       xs = map (\ (l,r) -> pretty l <+> "=" <+> pretty r) eqs
-      rhs = case over of
-              Overapplied    -> "=" <+> pretty meta
-              NotOverapplied -> mempty
-    prettyList_ xs <+> "⊢" <+> pretty val <+> rhs
+      -- rhs = case over of
+      --         Overapplied    -> "=" <+> pretty meta
+      --         NotOverapplied -> mempty
+    prettyList_ xs <+> "⊢" <+> pretty val -- <+> rhs
 
 prettyConstraints :: [Closure Constraint] -> TCM [OutputForm C.Expr C.Expr]
 prettyConstraints cs = do
@@ -641,6 +645,9 @@ getConstraintsMentioning norm m = getConstrs instantiateBlockingFull (mentionsMe
     instantiateBlockingFull p
       = locallyTCState stInstantiateBlocking (const True) $
           instantiateFull p
+
+    nay :: MaybeT TCM Elims
+    nay = MaybeT $ pure Nothing
 
     -- Trying to find the actual meta application, as long as it's not
     -- buried too deep.
@@ -668,20 +675,34 @@ getConstraintsMentioning norm m = getConstrs instantiateBlockingFull (mentionsMe
         CheckLockedVars t _ _ _    -> isMeta t
         UsableAtModality _ ms _ t  -> caseMaybe ms (isMeta t) $ \ s -> isMetaS s `mplus` isMeta t
 
-    isMeta (MetaV m' es_m)
-      | m == m' = Just es_m
+    isMeta :: Term -> Maybe Elims
+    isMeta (MetaV m' es_m) | m == m' = pure es_m
     isMeta _  = Nothing
 
+    isMetaS :: I.Sort -> Maybe Elims
     isMetaS (MetaS m' es_m)
-      | m == m' = Just es_m
+      | m == m' = pure es_m
     isMetaS _  = Nothing
 
     getConstrs g f = liftTCM $ do
       cs <- stripConstraintPids . filter f <$> (mapM g =<< M.getAllConstraints)
-      reportSDoc "constr.ment" 20 $ "getConstraintsMentioning"
+      cs <- caseMaybeM (traverse lookupInteractionPoint =<< isInteractionMeta m) (pure cs) $ \ip -> do
+        let
+          boundary = MapS.keysSet (getBoundary (ipBoundary ip))
+          isRedundant c = case allApplyElims =<< hasHeadMeta c of
+            Just apps -> caseMaybeM (isFaceConstraint m apps) (pure False) $ \(_, endps, _, _) ->
+              pure $ Set.member endps boundary
+            Nothing -> pure False
+        filterM (flip enterClosure (fmap not . isRedundant) . theConstraint) cs
+
+      reportSDoc "tc.constr.mentioning" 20 $ "getConstraintsMentioning"
       forM cs $ \(PConstr s ub c) -> do
+        reportSDoc "tc.constr.mentioning" 20 $ "constraint:  " TP.<+> prettyTCM c
         c <- normalForm norm c
-        case allApplyElims =<< hasHeadMeta (clValue c) of
+        let hm = hasHeadMeta (clValue c)
+        reportSDoc "tc.constr.mentioning" 20 $ "constraint:  " TP.<+> prettyTCM c
+        reportSDoc "tc.constr.mentioning" 20 $ "hasHeadMeta: " TP.<+> prettyTCM hm
+        case allApplyElims =<< hm of
           Just as_m -> do
             -- unifyElimsMeta tries to move the constraint into
             -- (an extension of) the context where @m@ comes from.
@@ -725,15 +746,78 @@ getConstraints' g f = liftTCM $ do
         let m = QuestionMark emptyMetaInfo{ metaNumber = Just mi } ii
         abstractToConcrete_ $ OutputForm noRange [] alwaysUnblock $ Assign m e
 
+-- | Reify the boundary of an interaction point as something that can be
+-- shown to the user.
+getIPBoundary :: Rewrite -> InteractionId -> TCM [IPFace' C.Expr]
+getIPBoundary norm ii = withInteractionId ii $ do
+  ip <- lookupInteractionPoint ii
 
-getIPBoundary :: Rewrite -> InteractionId -> TCM [IPBoundary' C.Expr]
-getIPBoundary norm ii = do
-      ip <- lookupInteractionPoint ii
-      case ipClause ip of
-        IPClause { ipcBoundary = cs } -> do
-          forM cs $ \ cl -> enterClosure cl $ \ b ->
-            abstractToConcrete_ =<< reifyUnblocked =<< normalForm norm b
-        IPNoClause -> return []
+  io <- primIOne
+  iz <- primIZero
+
+  lookupInteractionMeta ii >>= \case
+    Just mi -> do
+      mv <- lookupLocalMeta mi
+
+      let t = jMetaType $ mvJudgement mv
+      telv@(TelV tel a) <- telView t
+
+      reportSDoc "tc.ip.boundary" 30 $ TP.vcat
+        [ "reifying interaction point boundary"
+        , "tel:       " TP.<+> prettyTCM tel
+        , "meta:      " TP.<+> prettyTCM mi
+        ]
+      reportSDoc "tc.ip.boundary" 30 $ "boundary:  " TP.<+> pure (pretty (getBoundary (ipBoundary ip)))
+
+      withInteractionId ii $ do
+      -- The boundary is a map associating terms (lambda abstractions)
+      -- to IntMap Bools. The meta solver will wrap each LHS in lambdas
+      -- corresponding to the interaction point's context. Each key of
+      -- the boundary has a subset of (the interval variables in) the
+      -- interaction point's context as a keysSet.
+      as <- getContextArgs
+      let
+        c = abstractToConcrete_ <=< reifyUnblocked <=< normalForm norm
+        go (im, rhs) = do
+          reportSDoc "tc.ip.boundary" 30 $ TP.vcat
+            [ "reifying constraint for face" TP.<+> TP.pretty im
+            ]
+          reportSDoc "tc.ip.boundary" 30 $ "term " TP.<+> TP.prettyTCM rhs
+          -- Since the RHS is a lambda we have to apply it to the
+          -- context:
+          rhs <- c (rhs `apply` as)
+
+          -- Reify the IntMap Bool as a list of (i = i0) (j = i1) terms:
+          eqns <- forM (IntMap.toList im) $ \(a, b) -> do
+            a <- c (I.Var a [])
+            (,) a <$> c (if b then io else iz)
+          pure $ IPFace' eqns rhs
+      traverse go $ MapS.toList (getBoundary (ipBoundary ip))
+    Nothing -> pure []
+
+typeAndFacesInMeta :: InteractionId -> Rewrite -> Expr -> TCM (Expr, [IPFace' C.Expr])
+typeAndFacesInMeta ii norm expr = withInteractionId ii $ do
+  (ex, ty) <- inferExpr expr
+  ty <- normalForm norm ty
+  ip <- lookupInteractionPoint ii
+
+  io <- primIOne
+  iz <- primIZero
+  let
+    go im = do
+      let
+        c = abstractToConcrete_ <=< reifyUnblocked <=< normalForm norm
+        fa = IntMap.toList im
+        face (i, m) = inplaceS i $ if m then io else iz
+        sub = foldr (\f s -> composeS (face f) s) idS fa
+      eqns <- forM fa $ \(a, b) -> do
+        a <- c (I.Var a [])
+        (,) a <$> c (if b then io else iz)
+      fmap (IPFace' eqns) . c =<< simplify (applySubst sub ex)
+
+  faces <- traverse go $ MapS.keys (getBoundary (ipBoundary ip))
+  ty <- reifyUnblocked ty
+  pure (ty, faces)
 
 -- | Goals and Warnings
 
@@ -881,6 +965,12 @@ metaHelperType norm ii rng s = case words s of
     inCxt   <- hasElem <$> getContextNames
     cxtArgs <- getContextArgs
     a0      <- (`piApply` cxtArgs) <$> (getMetaType =<< lookupInteractionId ii)
+
+    -- Konstantin, 2022-10-23: We don't want to print section parameters in helper type.
+    freeVars <- getCurrentModuleFreeVars
+    contextForAbstracting <- drop freeVars . reverse <$> getContext
+    let escapeAbstractedContext = escapeContext impossible (length contextForAbstracting)
+
     case mapM (isVar . namedArg) args >>= \ xs -> xs <$ guard (all inCxt xs) of
 
      -- Andreas, 2019-10-11
@@ -889,24 +979,24 @@ metaHelperType norm ii rng s = case words s of
      Just xs -> do
       let inXs = hasElem xs
       let hideButXs dom = setHiding (if inXs $ fst $ unDom dom then NotHidden else Hidden) dom
-      tel  <- telFromList . map (fmap (first nameToArgName) . hideButXs) . reverse <$> getContext
+      let tel = telFromList . map (fmap (first nameToArgName) . hideButXs) $ contextForAbstracting
       OfType' h <$> do
         -- Andreas, 2019-10-11: I actually prefer pi-types over ->.
-        localTC (\e -> e { envPrintDomainFreePi = True }) $ reify $ telePiVisible tel a0
+        localTC (\e -> e { envPrintDomainFreePi = True }) $ escapeAbstractedContext $
+          reify $ telePiVisible tel a0
 
      -- If some arguments are not variables.
      Nothing -> do
-      cxtArgs  <- getContextArgs
       -- cleanupType relies on with arguments being named 'w',
       -- so we'd better rename any actual 'w's to avoid confusion.
-      tel  <- runIdentity . onNamesTel unW <$> getContextTelescope
+      let tel = runIdentity . onNamesTel unW . telFromList' nameToArgName $ contextForAbstracting
       let a = runIdentity . onNames unW $ a0
       vtys <- mapM (\ a -> fmap (Arg (getArgInfo a) . fmap OtherType) $ inferExpr $ namedArg a) args
       -- Remember the arity of a
       TelV atel _ <- telView a
       let arity = size atel
           (delta1, delta2, _, a', vtys') = splitTelForWith tel a vtys
-      a <- localTC (\e -> e { envPrintDomainFreePi = True }) $ do
+      a <- localTC (\e -> e { envPrintDomainFreePi = True, envPrintMetasBare = True }) $ escapeAbstractedContext $ do
         reify =<< cleanupType arity args =<< normalForm norm =<< fst <$> withFunctionType delta1 vtys' delta2 a' []
       reportSDoc "interaction.helper" 10 $ TP.vcat $
         let extractOtherType = \case { OtherType a -> a; _ -> __IMPOSSIBLE__ } in
@@ -1033,15 +1123,17 @@ contextOfMeta ii norm = withInteractionId ii $ do
         ty <- reifyUnblocked =<< normalForm norm t
         return $ ResponseContextEntry n x (Arg ai ty) Nothing s
 
-    mkLet :: (Name, Open (Term, Dom I.Type)) -> TCM (Maybe ResponseContextEntry)
+    mkLet :: (Name, Open M.LetBinding) -> TCM (Maybe ResponseContextEntry)
     mkLet (name, lb) = do
-      (tm, !dom) <- getOpen lb
+      LetBinding _ tm !dom <- getOpen lb
       if shouldHide (domInfo dom) name then return Nothing else Just <$> do
         let n = nameConcrete name
         x  <- abstractToConcrete_ name
         let s = C.isInScope x
         ty <- reifyUnblocked =<< normalForm norm dom
-        v  <- reifyUnblocked =<< normalForm norm tm
+              -- Remove let bindings from x and later, to avoid folding to x = x, or using bindings
+              -- not introduced when x was defined.
+        v  <- removeLetBindingsFrom name $ reifyUnblocked =<< normalForm norm tm
         return $ ResponseContextEntry n x ty (Just v) s
 
     shouldHide :: ArgInfo -> A.Name -> Bool
@@ -1098,9 +1190,9 @@ introTactic pmLambda ii = do
           I.Def d _ -> do
             def <- getConstInfo d
             case theDef def of
-              Datatype{}    -> addContext tel' $ introData t
+              Datatype{}    -> addContext tel' $ introData AmbiguousNothing t
               Record{ recNamedCon = name }
-                | name      -> addContext tel' $ introData t
+                | name      -> addContext tel' $ introData AmbiguousConProjs t
                 | otherwise -> addContext tel' $ introRec d
               _ -> fallback
           _ -> fallback
@@ -1111,8 +1203,8 @@ introTactic pmLambda ii = do
     conName [p] = [ c | I.ConP c _ _ <- [namedArg p] ]
     conName _   = __IMPOSSIBLE__
 
-    showUnambiguousConName v =
-       render . pretty <$> runAbsToCon (lookupQName AmbiguousNothing $ I.conName v)
+    showUnambiguousConName amb v =
+       render . pretty <$> runAbsToCon (lookupQName amb $ I.conName v)
 
     showTCM :: PrettyTCM a => a -> TCM String
     showTCM v = render <$> prettyTCM v
@@ -1127,7 +1219,7 @@ introTactic pmLambda ii = do
             allHidden   = not (any okHiding0 hs)
             okHiding    = if allHidden then const True else okHiding0
         vars <- -- setShowImplicitArguments (imp || allHidden) $
-                (if allHidden then withShowAllArguments else id) $
+                applyWhen allHidden withShowAllArguments $
                   mapM showTCM [ setHiding h $ defaultArg $ var i :: Arg Term
                                | (h, i) <- zip hs $ downFrom n
                                , okHiding h
@@ -1142,15 +1234,15 @@ introTactic pmLambda ii = do
         makeName ("_", t) = ("x", t)
         makeName (x, t)   = (x, t)
 
-    introData :: I.Type -> TCM [String]
-    introData t = do
+    introData :: AllowAmbiguousNames -> I.Type -> TCM [String]
+    introData amb t = do
       let tel  = telFromList [defaultDom ("_", t)]
           pat  = [defaultArg $ unnamed $ debruijnNamedVar "c" 0]
       r <- splitLast CoInductive tel pat
       case r of
         Left err -> return []
         Right cov ->
-           mapM showUnambiguousConName $ concatMap (conName . scPats) $ splitClauses cov
+           mapM (showUnambiguousConName amb) $ concatMap (conName . scPats) $ splitClauses cov
 
     introRec :: QName -> TCM [String]
     introRec d = do

@@ -6,7 +6,7 @@ module Agda.Syntax.TopLevelModuleName where
 
 import Control.DeepSeq
 
-import Data.Function
+import Data.Function (on)
 import Data.Hashable
 import qualified Data.List as List
 import Data.Text (Text)
@@ -55,6 +55,7 @@ instance Ord RawTopLevelModuleName where
 
 instance Sized RawTopLevelModuleName where
   size = size . rawModuleNameParts
+  natSize = natSize . rawModuleNameParts
 
 instance Pretty RawTopLevelModuleName where
   pretty = text . rawTopLevelModuleNameToString
@@ -127,8 +128,8 @@ rawTopLevelModuleNameForModule :: C.Module -> RawTopLevelModuleName
 rawTopLevelModuleNameForModule (C.Mod _ []) = __IMPOSSIBLE__
 rawTopLevelModuleNameForModule (C.Mod _ ds) =
   case C.spanAllowedBeforeModule ds of
-    (_, C.Module _ n _ _ : _) -> rawTopLevelModuleNameForQName n
-    _                         -> __IMPOSSIBLE__
+    (_, C.Module _ _ n _ _ : _) -> rawTopLevelModuleNameForQName n
+    _                           -> __IMPOSSIBLE__
 
 ------------------------------------------------------------------------
 -- Top-level module names
@@ -157,6 +158,7 @@ instance Hashable TopLevelModuleName where
 
 instance Sized TopLevelModuleName where
   size = size . rawTopLevelModuleName
+  natSize = natSize . rawTopLevelModuleName
 
 instance Pretty TopLevelModuleName where
   pretty = pretty . rawTopLevelModuleName
@@ -178,7 +180,7 @@ instance NFData TopLevelModuleName where
 -- | A lens focusing on the 'moduleNameParts'.
 
 lensTopLevelModuleNameParts ::
-  Lens' TopLevelModuleNameParts TopLevelModuleName
+  Lens' TopLevelModuleName TopLevelModuleNameParts
 lensTopLevelModuleNameParts f m =
   f (moduleNameParts m) <&> \ xs -> m{ moduleNameParts = xs }
 

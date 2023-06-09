@@ -103,7 +103,7 @@ termDecl' = \case
     A.Field {}            -> return mempty
     A.Primitive {}        -> return mempty
     A.Mutual i ds         -> termMutual $ getNames ds
-    A.Section _ _ _ ds    -> termDecls ds
+    A.Section _ _ _ _ ds  -> termDecls ds
         -- section structure can be ignored as we are termination checking
         -- definitions lifted to the top-level
     A.Apply {}            -> return mempty
@@ -111,6 +111,7 @@ termDecl' = \case
     A.Pragma {}           -> return mempty
     A.Open {}             -> return mempty
     A.PatternSynDef {}    -> return mempty
+    A.UnfoldingDecl{}     -> return mempty
     A.Generalize {}       -> return mempty
         -- open, pattern synonym and generalize defs are just artifacts from the concrete syntax
     A.ScopedDecl scope ds -> {- withScope_ scope $ -} termDecls ds
@@ -136,7 +137,7 @@ termDecl' = \case
     getName (A.FunDef i x delayed cs)   = [x]
     getName (A.RecDef _ x _ _ _ _ ds)   = x : getNames ds
     getName (A.Mutual _ ds)             = getNames ds
-    getName (A.Section _ _ _ ds)        = getNames ds
+    getName (A.Section _ _ _ _ ds)      = getNames ds
     getName (A.ScopedDecl _ ds)         = getNames ds
     getName (A.UnquoteDecl _ _ xs _)    = xs
     getName (A.UnquoteDef _ xs _)       = xs
@@ -690,13 +691,9 @@ termClause clause = do
     parseDotP = \case
       DotP o t -> termToDBP t
       p        -> return p
-    stripCoCon p = case p of
-      ConP (ConHead c _ _ _) _ _ -> do
-        ifM ((Just c ==) <$> terGetSizeSuc) (return p) $ {- else -} do
-        whatInduction c >>= \case
-          Inductive   -> return p
-          CoInductive -> return unusedVar
-      _ -> return p
+    stripCoCon = \case
+      ConP (ConHead c _ CoInductive _) _ _ -> return unusedVar
+      p -> return p
     reportBody :: Term -> TerM ()
     reportBody v = verboseS "term.check.clause" 6 $ do
       f       <- terGetCurrent
@@ -753,13 +750,12 @@ instance ExtractCalls Sort where
       reportSDoc "term.sort" 50 $
         text ("s = " ++ show s)
     case s of
-      Inf f n    -> return empty
+      Inf _ _    -> return empty
       SizeUniv   -> return empty
       LockUniv   -> return empty
+      LevelUniv  -> return empty
       IntervalUniv -> return empty
-      Type t     -> terUnguarded $ extract t  -- no guarded levels
-      Prop t     -> terUnguarded $ extract t
-      SSet t     -> terUnguarded $ extract t
+      Univ _ t       -> terUnguarded $ extract t  -- no guarded levels
       PiSort a s1 s2 -> extract (a, s1, s2)
       FunSort s1 s2 -> extract (s1, s2)
       UnivSort s -> extract s
@@ -1313,7 +1309,7 @@ instance StripAllProjections Term where
         -- c <- fromRightM (\ err -> return c) $ getConForm (conName c)
         Con c ci <$> stripAllProjections ts
       Def d es   -> Def d <$> stripAllProjections es
-      DontCare t -> stripAllProjections t
+      DontCare t -> DontCare <$> stripAllProjections t
       _ -> return t
 
 -- | Normalize outermost constructor name in a pattern.
@@ -1340,8 +1336,7 @@ compareTerm' v mp@(Masked m p) = do
     (Var i es, _) | Just{} <- allApplyElims es ->
       compareVar i mp
 
-    (DontCare t, _) ->
-      compareTerm' t mp
+    (DontCare t, _) -> pure Order.unknown
 
     -- Andreas, 2014-09-22, issue 1281:
     -- For metas, termination checking should be optimistic.

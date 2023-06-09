@@ -8,10 +8,10 @@
 env:
   AGDA_TESTS_OPTIONS: -j${PARALLEL_TESTS} --hide-successes
   BUILD_DIR: dist
-  GHC_VER: 9.4.3
+  GHC_VER: 9.4.5
   PARALLEL_TESTS: 2
   STACK: stack --system-ghc
-  STACK_VER: 2.9.1
+  STACK_VER: 2.9.3
   TASTY_ANSI_TRICKS: 'false'
 jobs:
   build:
@@ -22,7 +22,16 @@ jobs:
       && !contains(github.event.head_commit.message, '[skip github]')
     runs-on: ubuntu-22.04
     steps:
-    - uses: styfle/cancel-workflow-action@0.11.0
+    - name: Info about the context
+      run: |
+        echo "github.base_ref   = ${{ github.base_ref   }}"
+        echo "github.head_ref   = ${{ github.head_ref   }}"
+        echo "github.event_name = ${{ github.event_name }}"
+        echo "github.ref        = ${{ github.ref        }}"
+        echo "github.ref_name   = ${{ github.ref_name   }}"
+        echo "github.ref_type   = ${{ github.ref_type   }}"
+    - if: github.ref != 'refs/heads/master'
+      uses: styfle/cancel-workflow-action@0.11.0
       with:
         access_token: ${{ github.token }}
     - uses: actions/checkout@v3
@@ -35,13 +44,21 @@ jobs:
         stack-version: ${{ env.STACK_VER }}
     - name: Copy stack-${{ env.GHC_VER}}.yaml to stack.yaml
       run: cp stack-${{ env.GHC_VER }}.yaml stack.yaml
+    - name: Determine the ICU version
+      run: |
+        ICU_VER=$(pkg-config --modversion icu-i18n)
+        echo "ICU_VER=${ICU_VER}"
+        echo "ICU_VER=${ICU_VER}" >> "${GITHUB_ENV}"
     - id: cache
-      name: Cache dependencies
+      name: Restore cache from approximate key
       uses: actions/cache@v3
       with:
-        key: ${{ runner.os }}-stack-${{ env.STACK_VER }}-${{ env.GHC_VER }}-${{ hashFiles('stack.yaml')
-          }}
-        path: ~/.stack
+        key: test.yml-ghc-${{ env.GHC_VER }}-stack-${{ env.STACK_VER }}-icu-${{ env.ICU_VER
+          }}-plan-${{ hashFiles('Agda.cabal','stack.yaml') }}
+        path: |
+          ~/.stack
+        restore-keys: test.yml-ghc-${{ env.GHC_VER }}-stack-${{ env.STACK_VER }}-icu-${{
+          env.ICU_VER }}-
     - name: Install dependencies for Agda and its test suites
       run: make install-deps
     - name: Build Agda
@@ -90,13 +107,19 @@ jobs:
       run: |
         tar --use-compress-program zstd -xvf dist.tzst
         tar --use-compress-program zstd -xvf stack-work.tzst
+    - name: Determine the ICU version
+      run: |
+        ICU_VER=$(pkg-config --modversion icu-i18n)
+        echo "ICU_VER=${ICU_VER}"
+        echo "ICU_VER=${ICU_VER}" >> "${GITHUB_ENV}"
     - id: cache
-      name: Cache dependencies
-      uses: actions/cache@v3
+      name: Restore cache from exact key
+      uses: actions/cache/restore@v3
       with:
-        key: ${{ runner.os }}-stack-${{ env.STACK_VER }}-${{ env.GHC_VER }}-${{ hashFiles('stack.yaml')
-          }}
-        path: ~/.stack
+        key: test.yml-ghc-${{ env.GHC_VER }}-stack-${{ env.STACK_VER }}-icu-${{ env.ICU_VER
+          }}-plan-${{ hashFiles('Agda.cabal','stack.yaml') }}
+        path: |
+          ~/.stack
     - name: Cubical library test
       run: make BUILD_DIR="${GITHUB_WORKSPACE}/${BUILD_DIR}" cubical-test
     - name: Successful tests using the cubical library
@@ -120,13 +143,19 @@ jobs:
       run: |
         tar --use-compress-program zstd -xvf dist.tzst
         tar --use-compress-program zstd -xvf stack-work.tzst
+    - name: Determine the ICU version
+      run: |
+        ICU_VER=$(pkg-config --modversion icu-i18n)
+        echo "ICU_VER=${ICU_VER}"
+        echo "ICU_VER=${ICU_VER}" >> "${GITHUB_ENV}"
     - id: cache
-      name: Cache dependencies
-      uses: actions/cache@v3
+      name: Restore cache from exact key
+      uses: actions/cache/restore@v3
       with:
-        key: ${{ runner.os }}-stack-${{ env.STACK_VER }}-${{ env.GHC_VER }}-${{ hashFiles('stack.yaml')
-          }}
-        path: ~/.stack
+        key: test.yml-ghc-${{ env.GHC_VER }}-stack-${{ env.STACK_VER }}-icu-${{ env.ICU_VER
+          }}-plan-${{ hashFiles('Agda.cabal','stack.yaml') }}
+        path: |
+          ~/.stack
     - name: Install Tex Live and Emacs
       run: |
         sudo apt-get update
@@ -157,13 +186,19 @@ jobs:
       run: |
         tar --use-compress-program zstd -xvf dist.tzst
         tar --use-compress-program zstd -xvf stack-work.tzst
+    - name: Determine the ICU version
+      run: |
+        ICU_VER=$(pkg-config --modversion icu-i18n)
+        echo "ICU_VER=${ICU_VER}"
+        echo "ICU_VER=${ICU_VER}" >> "${GITHUB_ENV}"
     - id: cache
-      name: Cache dependencies
-      uses: actions/cache@v3
+      name: Restore cache from exact key
+      uses: actions/cache/restore@v3
       with:
-        key: ${{ runner.os }}-stack-${{ env.STACK_VER }}-${{ env.GHC_VER }}-${{ hashFiles('stack.yaml')
-          }}
-        path: ~/.stack
+        key: test.yml-ghc-${{ env.GHC_VER }}-stack-${{ env.STACK_VER }}-icu-${{ env.ICU_VER
+          }}-plan-${{ hashFiles('Agda.cabal','stack.yaml') }}
+        path: |
+          ~/.stack
     - name: Standard library test
       run: |
         # ASR (2021-01-17). `cabal update` is required due to #5138.
@@ -195,13 +230,19 @@ jobs:
       run: |
         tar --use-compress-program zstd -xvf dist.tzst
         tar --use-compress-program zstd -xvf stack-work.tzst
+    - name: Determine the ICU version
+      run: |
+        ICU_VER=$(pkg-config --modversion icu-i18n)
+        echo "ICU_VER=${ICU_VER}"
+        echo "ICU_VER=${ICU_VER}" >> "${GITHUB_ENV}"
     - id: cache
-      name: Cache dependencies
-      uses: actions/cache@v3
+      name: Restore cache from exact key
+      uses: actions/cache/restore@v3
       with:
-        key: ${{ runner.os }}-stack-${{ env.STACK_VER }}-${{ env.GHC_VER }}-${{ hashFiles('stack.yaml')
-          }}
-        path: ~/.stack
+        key: test.yml-ghc-${{ env.GHC_VER }}-stack-${{ env.STACK_VER }}-icu-${{ env.ICU_VER
+          }}-plan-${{ hashFiles('Agda.cabal','stack.yaml') }}
+        path: |
+          ~/.stack
     - name: Suite of tests for bugs
       run: make BUILD_DIR="${GITHUB_WORKSPACE}/${BUILD_DIR}" bugs
     - name: 'Suite of successful tests: mini-library Common'
@@ -245,6 +286,7 @@ name: Build, Test, and Benchmark
     - '!.mailmap'
     - '!.gitignore'
     - '!.hlint.yaml'
+    - '!.readthedocs.yaml'
     - '!.travis.yml'
     - '!CHANGELOG.md'
     - '!HACKING.md'
@@ -275,6 +317,7 @@ name: Build, Test, and Benchmark
     - '!.mailmap'
     - '!.gitignore'
     - '!.hlint.yaml'
+    - '!.readthedocs.yaml'
     - '!.travis.yml'
     - '!CHANGELOG.md'
     - '!HACKING.md'

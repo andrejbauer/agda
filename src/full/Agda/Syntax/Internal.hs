@@ -1,10 +1,10 @@
 {-# LANGUAGE CPP                        #-}
-{-# LANGUAGE PatternSynonyms            #-}
 
 module Agda.Syntax.Internal
     ( module Agda.Syntax.Internal
     , module Agda.Syntax.Internal.Blockers
     , module Agda.Syntax.Internal.Elim
+    , module Agda.Syntax.Internal.Univ
     , module Agda.Syntax.Abstract.Name
     , MetaId(..), ProblemId(..)
     ) where
@@ -14,7 +14,7 @@ import Prelude hiding (null)
 import Control.Monad.Identity
 import Control.DeepSeq
 
-import Data.Function
+import Data.Function (on)
 import qualified Data.List as List
 import Data.Maybe
 import Data.Semigroup ( Semigroup, (<>), Sum(..) )
@@ -32,6 +32,7 @@ import Agda.Syntax.Concrete.Pretty (prettyHiding)
 import Agda.Syntax.Abstract.Name
 import Agda.Syntax.Internal.Blockers
 import Agda.Syntax.Internal.Elim
+import Agda.Syntax.Internal.Univ
 
 import Agda.Utils.CallStack
     ( CallStack
@@ -43,6 +44,7 @@ import Agda.Utils.CallStack
 
 import Agda.Utils.Empty
 
+import Agda.Utils.Function
 import Agda.Utils.Functor
 import Agda.Utils.Lens
 import Agda.Utils.Null
@@ -88,7 +90,7 @@ instance HasRange a => HasRange (Dom' t a) where
   getRange = getRange . unDom
 
 instance (KillRange t, KillRange a) => KillRange (Dom' t a) where
-  killRange (Dom info x t b a) = killRange4 Dom info x t b a
+  killRange (Dom info x t b a) = killRangeN Dom info x t b a
 
 -- | Ignores 'Origin' and 'FreeVariables' and tactic.
 instance Eq a => Eq (Dom' t a) where
@@ -103,6 +105,10 @@ instance LensArgInfo (Dom' t e) where
   getArgInfo        = domInfo
   setArgInfo ai dom = dom { domInfo = ai }
   mapArgInfo f  dom = dom { domInfo = f $ domInfo dom }
+
+instance LensLock (Dom' t e) where
+  getLock = getLock . getArgInfo
+  setLock = mapArgInfo . setLock
 
 -- The other lenses are defined through LensArgInfo
 
@@ -262,7 +268,7 @@ instance Decoration (Type'' t) where
   traverseF f (El s a) = El s <$> f a
 
 class LensSort a where
-  lensSort ::  Lens' Sort a
+  lensSort ::  Lens' a Sort
   getSort  :: a -> Sort
   getSort a = a ^. lensSort
 
@@ -289,18 +295,21 @@ data Tele a = EmptyTel
 
 type Telescope = Tele (Dom Type)
 
-data IsFibrant = IsFibrant | IsStrict
-  deriving (Show, Eq, Ord, Generic)
+data UnivSize
+  = USmall  -- ^ @Prop/Set/SSet ℓ@.
+  | ULarge  -- ^ @(Prop/Set/SSet)ωᵢ@.
+  deriving stock (Eq, Show)
 
 -- | Sorts.
 --
 data Sort' t
-  = Type (Level' t)  -- ^ @Set ℓ@.
-  | Prop (Level' t)  -- ^ @Prop ℓ@.
-  | Inf IsFibrant !Integer      -- ^ @Setωᵢ@.
-  | SSet (Level' t)  -- ^ @SSet ℓ@.
+  = Univ Univ (Level' t)
+      -- ^ @Prop ℓ@, @Set ℓ@, @SSet ℓ@.
+  | Inf Univ !Integer
+      -- ^ @Propωᵢ@, @(S)Setωᵢ@.
   | SizeUniv    -- ^ @SizeUniv@, a sort inhabited by type @Size@.
   | LockUniv    -- ^ @LockUniv@, a sort for locks.
+  | LevelUniv   -- ^ @LevelUniv@, a sort inhabited by type @Level@. When --level-universe isn't on, this universe reduces to @Set 0@
   | IntervalUniv -- ^ @IntervalUniv@, a sort inhabited by the cubical interval.
   | PiSort (Dom' t t) (Sort' t) (Abs (Sort' t)) -- ^ Sort of the pi type.
   | FunSort (Sort' t) (Sort' t) -- ^ Sort of a (non-dependent) function type.
@@ -314,7 +323,25 @@ data Sort' t
     --   but can contain other information as well.
   deriving Show
 
+pattern Prop, Type, SSet :: Level' t -> Sort' t
+pattern Prop l = Univ UProp l
+pattern Type l = Univ UType l
+pattern SSet l = Univ USSet l
+
+{-# COMPLETE
+  Prop, Type, SSet, Inf,
+  SizeUniv, LockUniv, LevelUniv, IntervalUniv,
+  PiSort, FunSort, UnivSort, MetaS, DefS, DummyS #-}
+
 type Sort = Sort' Term
+
+-- | Is this a strict universe inhabitable by data types?
+isStrictDataSort :: Sort' t -> Bool
+isStrictDataSort = \case
+  Univ u _ -> univFibrancy u == IsStrict
+  Inf  u _ -> univFibrancy u == IsStrict
+  _ -> False
+
 
 -- | A level is a maximum expression of a closed level and 0..n
 --   'PlusLevel' expressions each of which is an atom plus a number.
@@ -943,7 +970,7 @@ telToList (ExtendTel arg (Abs x tel)) = fmap (x,) arg : telToList tel
 telToList (ExtendTel _    NoAbs{}   ) = __IMPOSSIBLE__
 
 -- | Lens to edit a 'Telescope' as a list.
-listTel :: Lens' ListTel Telescope
+listTel :: Lens' Telescope ListTel
 listTel f = fmap telFromList . f . telToList
 
 -- | Drop the types from a telescope.
@@ -1046,16 +1073,32 @@ hasElims v =
     MetaV x es -> Just (MetaV x, es)
     Con{}      -> Nothing
     Lit{}      -> Nothing
-    -- Andreas, 2016-04-13, Issue 1932: We convert λ x → x .f  into f
-    Lam h (Abs _ v) | visible h -> case v of
-      Var 0 [Proj _o f] -> Just (Def f, [])
-      _ -> Nothing
     Lam{}      -> Nothing
     Pi{}       -> Nothing
     Sort{}     -> Nothing
     Level{}    -> Nothing
     DontCare{} -> Nothing
     Dummy{}    -> Nothing
+
+---------------------------------------------------------------------------
+-- * Type family for type-directed operations.
+---------------------------------------------------------------------------
+
+-- @TypeOf a@ contains sufficient type information to do
+-- a type-directed traversal of @a@.
+type family TypeOf a
+
+type instance TypeOf Term        = Type                  -- Type of the term
+type instance TypeOf Elims       = (Type, Elims -> Term) -- Head symbol type + constructor
+type instance TypeOf (Abs Term)  = (Dom Type, Abs Type)  -- Domain type + codomain type
+type instance TypeOf (Abs Type)  = Dom Type              -- Domain type
+type instance TypeOf (Arg a)     = Dom (TypeOf a)
+type instance TypeOf (Dom a)     = TypeOf a
+type instance TypeOf Type        = ()
+type instance TypeOf Sort        = ()
+type instance TypeOf Level       = ()
+type instance TypeOf [PlusLevel] = ()
+type instance TypeOf PlusLevel   = ()
 
 ---------------------------------------------------------------------------
 -- * Null instances.
@@ -1101,8 +1144,12 @@ instance Sized (Tele a) where
   size  EmptyTel         = 0
   size (ExtendTel _ tel) = 1 + size tel
 
+  natSize EmptyTel          = Zero
+  natSize (ExtendTel _ tel) = Succ $ natSize tel
+
 instance Sized a => Sized (Abs a) where
-  size = size . unAbs
+  size    = size    . unAbs
+  natSize = natSize . unAbs
 
 -- | The size of a term is roughly the number of nodes in its
 --   syntax tree.  This number need not be precise for logical
@@ -1139,12 +1186,11 @@ instance TermSize Term where
 
 instance TermSize Sort where
   tsize = \case
-    Type l    -> 1 + tsize l
-    Prop l    -> 1 + tsize l
+    Univ _ l  -> 1 + tsize l
     Inf _ _   -> 1
-    SSet l    -> 1 + tsize l
     SizeUniv  -> 1
     LockUniv  -> 1
+    LevelUniv -> 1
     IntervalUniv -> 1
     PiSort a s1 s2 -> 1 + tsize a + tsize s1 + tsize s2
     FunSort s1 s2 -> 1 + tsize s1 + tsize s2
@@ -1175,81 +1221,80 @@ instance KillRange DataOrRecord where
   killRange = id
 
 instance KillRange ConHead where
-  killRange (ConHead c d i fs) = killRange4 ConHead c d i fs
+  killRange (ConHead c d i fs) = killRangeN ConHead c d i fs
 
 instance KillRange Term where
   killRange = \case
-    Var i vs    -> killRange1 (Var i) vs
-    Def c vs    -> killRange2 Def c vs
-    Con c ci vs -> killRange3 Con c ci vs
-    MetaV m vs  -> killRange1 (MetaV m) vs
-    Lam i f     -> killRange2 Lam i f
-    Lit l       -> killRange1 Lit l
-    Level l     -> killRange1 Level l
-    Pi a b      -> killRange2 Pi a b
-    Sort s      -> killRange1 Sort s
-    DontCare mv -> killRange1 DontCare mv
+    Var i vs    -> killRangeN (Var i) vs
+    Def c vs    -> killRangeN Def c vs
+    Con c ci vs -> killRangeN Con c ci vs
+    MetaV m vs  -> killRangeN (MetaV m) vs
+    Lam i f     -> killRangeN Lam i f
+    Lit l       -> killRangeN Lit l
+    Level l     -> killRangeN Level l
+    Pi a b      -> killRangeN Pi a b
+    Sort s      -> killRangeN Sort s
+    DontCare mv -> killRangeN DontCare mv
     v@Dummy{}   -> v
 
 instance KillRange Level where
-  killRange (Max n as) = killRange1 (Max n) as
+  killRange (Max n as) = killRangeN (Max n) as
 
 instance KillRange PlusLevel where
-  killRange (Plus n l) = killRange1 (Plus n) l
+  killRange (Plus n l) = killRangeN (Plus n) l
 
 instance (KillRange a) => KillRange (Type' a) where
-  killRange (El s v) = killRange2 El s v
+  killRange (El s v) = killRangeN El s v
 
 instance KillRange Sort where
   killRange = \case
-    Inf f n    -> Inf f n
+    Inf u n    -> Inf u n
     SizeUniv   -> SizeUniv
     LockUniv   -> LockUniv
+    LevelUniv  -> LevelUniv
     IntervalUniv -> IntervalUniv
-    Type a     -> killRange1 Type a
-    Prop a     -> killRange1 Prop a
-    SSet a     -> killRange1 SSet a
-    PiSort a s1 s2 -> killRange3 PiSort a s1 s2
-    FunSort s1 s2 -> killRange2 FunSort s1 s2
-    UnivSort s -> killRange1 UnivSort s
-    MetaS x es -> killRange1 (MetaS x) es
-    DefS d es  -> killRange2 DefS d es
+    Univ u a   -> killRangeN (Univ u) a
+    PiSort a s1 s2 -> killRangeN PiSort a s1 s2
+    FunSort s1 s2 -> killRangeN FunSort s1 s2
+    UnivSort s -> killRangeN UnivSort s
+    MetaS x es -> killRangeN (MetaS x) es
+    DefS d es  -> killRangeN DefS d es
     s@DummyS{} -> s
 
 instance KillRange Substitution where
   killRange IdS                    = IdS
   killRange (EmptyS err)           = EmptyS err
-  killRange (Wk n rho)             = killRange1 (Wk n) rho
-  killRange (t :# rho)             = killRange2 (:#) t rho
-  killRange (Strengthen err n rho) = killRange1 (Strengthen err n) rho
-  killRange (Lift n rho)           = killRange1 (Lift n) rho
+  killRange (Wk n rho)             = killRangeN (Wk n) rho
+  killRange (t :# rho)             = killRangeN (:#) t rho
+  killRange (Strengthen err n rho) = killRangeN (Strengthen err n) rho
+  killRange (Lift n rho)           = killRangeN (Lift n) rho
 
 instance KillRange PatOrigin where
   killRange = id
 
 instance KillRange PatternInfo where
-  killRange (PatternInfo o xs) = killRange2 PatternInfo o xs
+  killRange (PatternInfo o xs) = killRangeN PatternInfo o xs
 
 instance KillRange ConPatternInfo where
-  killRange (ConPatternInfo i mr b mt lz) = killRange1 (ConPatternInfo i mr b) mt lz
+  killRange (ConPatternInfo i mr b mt lz) = killRangeN (ConPatternInfo i mr b) mt lz
 
 instance KillRange DBPatVar where
-  killRange (DBPatVar x i) = killRange2 DBPatVar x i
+  killRange (DBPatVar x i) = killRangeN DBPatVar x i
 
 instance KillRange a => KillRange (Pattern' a) where
   killRange p =
     case p of
-      VarP o x         -> killRange2 VarP o x
-      DotP o v         -> killRange2 DotP o v
-      ConP con info ps -> killRange3 ConP con info ps
-      LitP o l         -> killRange2 LitP o l
-      ProjP o q        -> killRange1 (ProjP o) q
-      IApplyP o u t x  -> killRange3 (IApplyP o) u t x
-      DefP o q ps      -> killRange2 (DefP o) q ps
+      VarP o x         -> killRangeN VarP o x
+      DotP o v         -> killRangeN DotP o v
+      ConP con info ps -> killRangeN ConP con info ps
+      LitP o l         -> killRangeN LitP o l
+      ProjP o q        -> killRangeN (ProjP o) q
+      IApplyP o u t x  -> killRangeN (IApplyP o) u t x
+      DefP o q ps      -> killRangeN (DefP o) q ps
 
 instance KillRange Clause where
   killRange (Clause rl rf tel ps body t catchall exact recursive unreachable ell wm) =
-    killRange11 Clause rl rf tel ps body t catchall exact recursive unreachable ell wm
+    killRangeN Clause rl rf tel ps body t catchall exact recursive unreachable ell wm
 
 instance KillRange a => KillRange (Tele a) where
   killRange = fmap killRange
@@ -1310,10 +1355,12 @@ instance Pretty t => Pretty (Abs t) where
   pretty (NoAbs x t) = "NoAbs" <+> (text x <> ".") <+> pretty t
 
 instance (Pretty t, Pretty e) => Pretty (Dom' t e) where
-  pretty dom = pTac <+> pDom dom (pretty $ unDom dom)
+  pretty dom = pLock <+> pTac <+> pDom dom (pretty $ unDom dom)
     where
       pTac | Just t <- domTactic dom = "@" <> parens ("tactic" <+> pretty t)
            | otherwise               = empty
+      pLock | IsLock{} <- getLock dom = "@lock"
+            | otherwise = empty
 
 pDom :: LensHiding a => a -> Doc -> Doc
 pDom i =
@@ -1358,17 +1405,12 @@ instance Pretty PlusLevel where
 instance Pretty Sort where
   prettyPrec p s =
     case s of
-      Type (ClosedLevel 0) -> "Set"
-      Type (ClosedLevel n) -> text $ "Set" ++ show n
-      Type l -> mparens (p > 9) $ "Set" <+> prettyPrec 10 l
-      Prop (ClosedLevel 0) -> "Prop"
-      Prop (ClosedLevel n) -> text $ "Prop" ++ show n
-      Prop l -> mparens (p > 9) $ "Prop" <+> prettyPrec 10 l
-      Inf f 0 -> text $ addS f "Setω"
-      Inf f n -> text $ addS f "Setω" ++ show n
-      SSet l -> mparens (p > 9) $ "SSet" <+> prettyPrec 10 l
+      Univ u (ClosedLevel n) -> text $ suffix n $ showUniv u
+      Univ u l -> mparens (p > 9) $ text (showUniv u) <+> prettyPrec 10 l
+      Inf u n -> text $ suffix n $ showUniv u ++ "ω"
       SizeUniv -> "SizeUniv"
       LockUniv -> "LockUniv"
+      LevelUniv -> "LevelUniv"
       IntervalUniv -> "IntervalUniv"
       PiSort a s1 s2 -> mparens (p > 9) $
         "piSort" <+> pDom (domInfo a) (text (absName s2) <+> ":" <+> pretty (unDom a) <+> ":" <+> pretty s1)
@@ -1380,8 +1422,7 @@ instance Pretty Sort where
       DefS d es  -> prettyPrec p $ Def d es
       DummyS s   -> parens $ text s
    where
-     addS IsFibrant t = t
-     addS IsStrict  t = "S" ++ t
+     suffix n = applyWhen (n /= 0) (++ show n)
 
 instance Pretty Type where
   prettyPrec p (El _ a) = prettyPrec p a
@@ -1440,12 +1481,11 @@ instance NFData Type where
 
 instance NFData Sort where
   rnf = \case
-    Type l   -> rnf l
-    Prop l   -> rnf l
+    Univ _ l   -> rnf l
     Inf _ _  -> ()
-    SSet l   -> rnf l
     SizeUniv -> ()
     LockUniv -> ()
+    LevelUniv -> ()
     IntervalUniv -> ()
     PiSort a b c -> rnf (a, b, unAbs c)
     FunSort a b -> rnf (a, b)

@@ -39,6 +39,7 @@ import {-# SOURCE #-} Agda.TypeChecking.Primitive.Cubical.Base (isCubicalSubtype
 import {-# SOURCE #-} Agda.TypeChecking.ProjectionLike (eligibleForProjectionLike)
 
 import Agda.Utils.Either
+import Agda.Utils.Empty
 import Agda.Utils.Function (applyWhen)
 import Agda.Utils.Functor (for, ($>), (<&>))
 import Agda.Utils.Lens
@@ -51,6 +52,7 @@ import Agda.Utils.Singleton
 import Agda.Utils.Size
 
 import Agda.Utils.Impossible
+import qualified Data.Type.Bool as Bool
 
 mkCon :: ConHead -> ConInfo -> Args -> Term
 mkCon h info args = Con h info (map Apply args)
@@ -334,7 +336,7 @@ getDefType f t = do
               [ text $ "head d     = " ++ prettyShow d
               , "parameters =" <+> sep (map prettyTCM pars)
               ]
-            reportSLn "tc.deftype" 60 $ "parameters = " ++ show pars
+            reportSDoc "tc.deftype" 60 $ "parameters = " <+> pretty pars
             if length pars < npars then failure "does not supply enough parameters"
             else Just <$> a `piApplyM` pars
         _ -> failNotDef
@@ -348,7 +350,26 @@ getDefType f t = do
         , prettyTCM t
         , text $ "of its argument " ++ reason
         ]
-      return Nothing
+      reportSDoc "tc.deftype" 60 $ "raw type: " <+> pretty t
+      return $ case unEl t of
+        Dummy{} -> Just __DUMMY_TYPE__
+        _       -> Nothing
+
+-- | Apply a projection to an expression with a known type, returning
+--   the type of the projected value.
+--   The given type should either be a record type or a type eligible for
+--   the principal argument of a projection-like function.
+shouldBeProjectible :: (PureTCM m, MonadTCError m, MonadBlock m)
+                    => Term -> Type -> ProjOrigin -> QName -> m Type
+-- shouldBeProjectible t f = maybe failure return =<< projectionType t f
+shouldBeProjectible v t o f = do
+  t <- abortIfBlocked t
+  projectTyped v t o f >>= \case
+    Just (_ , _ , ft) -> return ft
+    Nothing -> case t of
+      El _ Dummy{} -> return __DUMMY_TYPE__
+      _ -> typeError $ ShouldBeRecordType t
+    -- TODO: more accurate error that makes sense also for proj.-like funs.
 
 -- | The analogue of 'piApply'.  If @v@ is a value of record type @t@
 --   with field @f@, then @projectTyped v t f@ returns the type of @f v@.
@@ -402,6 +423,25 @@ typeElims a self (e : es) = do
       (ProjT dom a :) <$> typeElims a self es
     IApply{} -> __IMPOSSIBLE__
 
+-- | Given a term with a given type and a list of eliminations, returning the
+--   type of the term applied to the eliminations.
+eliminateType :: (PureTCM m) => m Empty -> Term -> Type -> Elims -> m Type
+eliminateType err = eliminateType' err . applyE
+
+eliminateType' :: (PureTCM m) => m Empty -> (Elims -> Term) -> Type -> Elims -> m Type
+eliminateType' err hd t [] = return t
+eliminateType' err hd t (e : es) = case e of
+  Apply v -> do
+    t' <- piApplyM' err t v
+    eliminateType' err (hd . (e:)) t' es
+  Proj o f -> reduce t >>= getDefType f >>= \case
+    Just a -> ifNotPiType a (\_ -> absurd <$> err) $ \_ c ->
+      eliminateType' err (hd . (e:)) (c `absApp` (hd [])) es
+    Nothing -> absurd <$> err
+  IApply _ _ r -> do
+    t' <- piApplyM' err t r
+    eliminateType' err (hd . (e:)) t' es
+
 -- | Check if a name refers to an eta expandable record.
 --
 -- The answer is no for a record type with an erased constructor
@@ -423,9 +463,10 @@ isEtaRecord r = do
 
 isEtaCon :: HasConstInfo m => QName -> m Bool
 isEtaCon c = getConstInfo' c >>= \case
-  Left (SigUnknown err) -> __IMPOSSIBLE__
-  Left SigAbstract -> return False
-  Right def -> case theDef def of
+  Left (SigUnknown err)     -> __IMPOSSIBLE__
+  Left SigCubicalNotErasure -> __IMPOSSIBLE__
+  Left SigAbstract          -> return False
+  Right def                 -> case theDef def of
     Constructor {conData = r} -> isEtaRecord r
     _ -> return False
 
@@ -437,7 +478,7 @@ isEtaOrCoinductiveRecordConstructor c =
       -- If in doubt about coinductivity, then yes.
 
 -- | Check if a name refers to a record which is not coinductive.  (Projections are then size-preserving)
-isInductiveRecord :: QName -> TCM Bool
+isInductiveRecord :: HasConstInfo m => QName -> m Bool
 isInductiveRecord r = maybe False ((Just CoInductive /=) . recInduction) <$> isRecord r
 
 -- | Check if a type is an eta expandable record and return the record identifier and the parameters.
@@ -453,9 +494,10 @@ isEtaRecordType a = case unEl a of
 --   If yes, return record definition.
 isRecordConstructor :: HasConstInfo m => QName -> m (Maybe (QName, Defn))
 isRecordConstructor c = getConstInfo' c >>= \case
-  Left (SigUnknown err)        -> __IMPOSSIBLE__
-  Left SigAbstract             -> return Nothing
-  Right def -> case theDef $ def of
+  Left (SigUnknown err)     -> __IMPOSSIBLE__
+  Left SigCubicalNotErasure -> __IMPOSSIBLE__
+  Left SigAbstract          -> return Nothing
+  Right def                 -> case theDef $ def of
     Constructor{ conData = r } -> fmap (r,) <$> isRecord r
     _                          -> return Nothing
 

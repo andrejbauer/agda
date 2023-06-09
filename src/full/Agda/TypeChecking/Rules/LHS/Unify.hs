@@ -170,7 +170,6 @@ import Agda.TypeChecking.Rules.LHS.Unify.Types
 import Agda.TypeChecking.Rules.LHS.Unify.LeftInverse
 
 import Agda.Utils.Empty
-import Agda.Utils.Either
 import Agda.Utils.Benchmark
 import Agda.Utils.Either
 import Agda.Utils.Function
@@ -856,7 +855,7 @@ solutionStep retry s
   -- Jesper, Andreas, 2018-10-17: the quantity of the equation is morally
   -- always @Quantity0@, since the indices of the data type are runtime erased.
   -- Thus, we need not change the quantity of the solution.
-  envmod <- viewTC eModality
+  envmod <- currentModality
   let eqrel  = getRelevance dom
       eqmod  = getModality dom
       varmod = getModality dom'
@@ -958,7 +957,7 @@ unify s strategy = if isUnifyStateSolved s
 patternBindingForcedVars :: PureTCM m => IntMap Modality -> Term -> m (DeBruijnPattern, IntMap Modality)
 patternBindingForcedVars forced v = do
   let v' = precomputeFreeVars_ v
-  runWriterT (evalStateT (go defaultModality v') forced)
+  runWriterT (evalStateT (go unitModality v') forced)
   where
     noForced v = gets $ IntSet.disjoint (precomputedFreeVars v) . IntMap.keysSet
 

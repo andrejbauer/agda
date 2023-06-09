@@ -85,11 +85,14 @@ toFinitePi _ = __IMPOSSIBLE__
 el' :: Applicative m => m Term -> m Term -> m Type
 el' l a = El <$> (tmSort <$> l) <*> a
 
+els :: Applicative m => m Sort -> m Term -> m Type
+els l a = El <$> l <*> a
+
 el's :: Applicative m => m Term -> m Term -> m Type
 el's l a = El <$> (SSet . atomicLevel <$> l) <*> a
 
 elInf :: Functor m => m Term -> m Type
-elInf t = (El (Inf IsFibrant 0) <$> t)
+elInf t = (El (Inf UType 0) <$> t)
 
 elSSet :: Functor m => m Term -> m Type
 elSSet t = (El (SSet $ ClosedLevel 0) <$> t)
@@ -151,6 +154,9 @@ sSizeUniv = SizeUniv
 tSizeUniv :: Applicative m => m Type
 tSizeUniv = pure $ sort sSizeUniv
 
+tLevelUniv :: Applicative m => m Type
+tLevelUniv = pure $ sort $ LevelUniv
+
 -- | Abbreviation: @argN = 'Arg' 'defaultArgInfo'@.
 argN :: e -> Arg e
 argN = Arg defaultArgInfo
@@ -169,20 +175,23 @@ domH = setHiding Hidden . defaultDom
 -- * Accessing the primitive functions
 ---------------------------------------------------------------------------
 
-lookupPrimitiveFunction :: String -> TCM PrimitiveImpl
+lookupPrimitiveFunction :: PrimitiveId -> TCM PrimitiveImpl
 lookupPrimitiveFunction x =
   fromMaybe (do
-                reportSDoc "tc.prim" 20 $ "Lookup of primitive function" <+> text x <+> "failed"
-                typeError $ NoSuchPrimitiveFunction x)
+                reportSDoc "tc.prim" 20 $ "Lookup of primitive function" <+> pretty x <+> "failed"
+                typeError $ NoSuchPrimitiveFunction (getBuiltinId x))
             (Map.lookup x primitiveFunctions)
 
-lookupPrimitiveFunctionQ :: QName -> TCM (String, PrimitiveImpl)
+lookupPrimitiveFunctionQ :: QName -> TCM (PrimitiveId, PrimitiveImpl)
 lookupPrimitiveFunctionQ q = do
   let s = prettyShow (nameCanonical $ qnameName q)
-  PrimImpl t pf <- lookupPrimitiveFunction s
-  return (s, PrimImpl t $ pf { primFunName = q })
+  case primitiveById s of
+    Nothing -> typeError $ NoSuchPrimitiveFunction s
+    Just s -> do
+      PrimImpl t pf <- lookupPrimitiveFunction s
+      return (s, PrimImpl t $ pf { primFunName = q })
 
-getBuiltinName :: (HasBuiltins m, MonadReduce m) => String -> m (Maybe QName)
+getBuiltinName :: (HasBuiltins m, MonadReduce m) => BuiltinId -> m (Maybe QName)
 getBuiltinName b = runMaybeT $ getQNameFromTerm =<< MaybeT (getBuiltin' b)
 
 -- | Convert a name in 'Term' form back to 'QName'.
@@ -196,7 +205,7 @@ getQNameFromTerm v = do
       Lam _ b   -> getQNameFromTerm $ unAbs b
       _ -> mzero
 
-isBuiltin :: (HasBuiltins m, MonadReduce m) => QName -> String -> m Bool
+isBuiltin :: (HasBuiltins m, MonadReduce m) => QName -> BuiltinId -> m Bool
 isBuiltin q b = (Just q ==) <$> getBuiltinName b
 
 ------------------------------------------------------------------------

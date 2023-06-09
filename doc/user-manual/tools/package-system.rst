@@ -93,14 +93,15 @@ Naturally, unnamed libraries cannot be depended upon.
 But dropping the ``name`` is possible if the library file only serves to list
 include paths and/or dependencies of the current project.
 
-.. _The_agda-lib_files_associated_to_a_give_Agda_file:
+.. _The_agda-lib_files_associated_to_a_given_Agda_file:
 
 The ``.agda-lib`` files associated to a given Agda file
 -------------------------------------------------------
 
 When a given file is type-checked Agda uses the options from the
-``flags`` field of zero or more library files. These files are found
-in the following way:
+``flags`` fields of zero or more library files. If the command-line
+option :option:`--no-libraries` is used, then no library files are
+used. Otherwise library files are found in the following way:
 
 - First the file's root directory is found. If the top-level module in
   the file is called ``A.B.C``, then it has to be in the directory
@@ -118,6 +119,12 @@ Note that if the search finds two or more ``.agda-lib`` files, then
 the flags from all of these files are used, and flags from different
 files are ordered in an unspecified way.
 
+Note also that there must not be any ``.agda-lib`` files below the
+root, on the path to the Agda file. For instance, if the top-level
+module in the Agda file is called ``A.B.C``, and it is in the
+directory ``root/A/B``, then there must not be any ``.agda-lib`` files
+in ``root/A`` or ``root/A/B``.
+
 Installing libraries
 --------------------
 
@@ -133,7 +140,7 @@ where ``VERSION`` is the Agda version (for instance ``2.5.1``). The
 overridden by setting the ``AGDA_DIR`` environment variable.
 
 Each line of the libraries file shall be the absolute file system path to
-the root of a library.
+the root of a library, or a comment line starting with ``--`` followed by a space character.
 
 Environment variables in the paths (of the form ``$VAR`` or ``${VAR}``) are
 expanded. The location of the ``libraries`` file used can be overridden using

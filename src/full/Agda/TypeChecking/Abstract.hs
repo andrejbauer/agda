@@ -5,7 +5,7 @@ module Agda.TypeChecking.Abstract where
 import Control.Monad
 import Control.Monad.Except
 
-import Data.Function
+import Data.Function (on)
 import qualified Data.HashMap.Strict as HMap
 
 import Agda.Syntax.Common
@@ -205,13 +205,12 @@ instance AbsTerm Type where
 
 instance AbsTerm Sort where
   absTerm u = \case
-    Type n     -> Type $ absS n
-    Prop n     -> Prop $ absS n
-    s@(Inf f n)-> s
-    SSet n     -> SSet $ absS n
+    Univ u n   -> Univ u $ absS n
+    s@Inf{}    -> s
     SizeUniv   -> SizeUniv
     LockUniv   -> LockUniv
-    IntervalUniv -> LockUniv
+    LevelUniv  -> LevelUniv
+    IntervalUniv -> IntervalUniv
     PiSort a s1 s2 -> PiSort (absS a) (absS s1) (absS s2)
     FunSort s1 s2 -> FunSort (absS s1) (absS s2)
     UnivSort s -> UnivSort $ absS s
@@ -292,11 +291,10 @@ instance EqualSy PlusLevel where
 
 instance EqualSy Sort where
   equalSy = curry $ \case
-    (Type l    , Type l'     ) -> equalSy l l'
-    (Prop l    , Prop l'     ) -> equalSy l l'
-    (Inf f m   , Inf f' n    ) -> f == f' && m == n
-    (SSet l    , SSet l'     ) -> equalSy l l'
+    (Univ u l  , Univ u' l'  ) -> u == u' && equalSy l l'
+    (Inf u m   , Inf u' n    ) -> u == u' && m == n
     (SizeUniv  , SizeUniv    ) -> True
+    (LevelUniv , LevelUniv   ) -> True
     (PiSort a b c, PiSort a' b' c') -> equalSy a a' && equalSy b b' && equalSy c c'
     (FunSort a b, FunSort a' b') -> equalSy a a' && equalSy b b'
     (UnivSort a, UnivSort a' ) -> equalSy a a'

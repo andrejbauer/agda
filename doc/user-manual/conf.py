@@ -20,7 +20,7 @@
 # -- Project information -----------------------------------------------------
 
 project = 'Agda'
-copyright = u'''2005–2022 remains with the authors.'''
+copyright = u'''2005–2023 remains with the authors.'''
 author = u'The Agda Team'
 
 # The short X.Y version
@@ -35,7 +35,7 @@ release = version
 #
 # If your change the version here also change it in the
 # `requirements.txt` file [Issue #1936].
-needs_sphinx = '5.0.0'
+needs_sphinx = '6.0.0'
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom

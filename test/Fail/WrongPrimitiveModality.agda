@@ -1,3 +1,4 @@
+{-# OPTIONS --erasure #-}
 
 module _ where
 
@@ -11,7 +12,7 @@ postulate
 primitive
   @0 ⦃ primShowNat ⦄ : Nat → String
 
--- Wrong modality for primitive primShowNat
+-- Wrong definition properties for primitive primShowNat
 --   Got:      instance, erased
 --   Expected: visible, unrestricted
 -- when checking that the type of the primitive function primShowNat

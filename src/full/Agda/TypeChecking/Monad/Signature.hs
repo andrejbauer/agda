@@ -56,10 +56,12 @@ import {-# SOURCE #-} Agda.TypeChecking.Polarity
 import {-# SOURCE #-} Agda.TypeChecking.Pretty
 import {-# SOURCE #-} Agda.TypeChecking.ProjectionLike
 import {-# SOURCE #-} Agda.TypeChecking.Reduce
+import {-# SOURCE #-} Agda.TypeChecking.Opacity
 
 import {-# SOURCE #-} Agda.Compiler.Treeless.Erase
 import {-# SOURCE #-} Agda.Compiler.Builtin
 
+import Agda.Utils.CallStack.Base
 import Agda.Utils.Either
 import Agda.Utils.Functor
 import Agda.Utils.Lens
@@ -69,17 +71,102 @@ import Agda.Utils.ListT
 import Agda.Utils.Maybe
 import Agda.Utils.Monad
 import Agda.Utils.Null
-import Agda.Utils.Pretty (prettyShow)
+import Agda.Utils.Pretty (Doc, prettyShow)
 import Agda.Utils.Singleton
 import Agda.Utils.Size
 import Agda.Utils.Update
 
 import Agda.Utils.Impossible
 
+-- | If the first argument is @'Erased' something@, then hard
+-- compile-time mode is enabled when the continuation is run.
+
+setHardCompileTimeModeIfErased
+  :: Erased
+  -> TCM a
+     -- ^ Continuation.
+  -> TCM a
+setHardCompileTimeModeIfErased erased c = do
+  localTC ((if isErased erased
+            then set eHardCompileTimeMode True
+            else id) .
+           over eQuantity (`composeQuantity` asQuantity erased))
+    c
+
+-- | If the quantity is \"erased\", then hard compile-time mode is
+-- enabled when the continuation is run.
+--
+-- Precondition: The quantity must not be @'Quantity1' something@.
+
+setHardCompileTimeModeIfErased'
+  :: LensQuantity q
+  => q
+     -- ^ The quantity.
+  -> TCM a
+     -- ^ Continuation.
+  -> TCM a
+setHardCompileTimeModeIfErased' x c = do
+  erased <- case erasedFromQuantity (getQuantity x) of
+    Nothing     -> __IMPOSSIBLE__
+    Just erased -> return erased
+  setHardCompileTimeModeIfErased erased c
+
+-- | Use run-time mode in the continuation unless the current mode is
+-- the hard compile-time mode.
+
+setRunTimeModeUnlessInHardCompileTimeMode
+  :: TCM a
+     -- ^ Continuation.
+  -> TCM a
+setRunTimeModeUnlessInHardCompileTimeMode c =
+  ifM (viewTC eHardCompileTimeMode) c $
+  localTC (over eQuantity $ mapQuantity (`addQuantity` topQuantity)) c
+
+-- | Use hard compile-time mode in the continuation if the first
+-- argument is @'Erased' something@. Use run-time mode if the first
+-- argument is @'NotErased' something@ and the current mode is not
+-- hard compile-time mode.
+
+setModeUnlessInHardCompileTimeMode
+  :: Erased
+  -> TCM a
+     -- ^ Continuation.
+  -> TCM a
+setModeUnlessInHardCompileTimeMode erased c = case erased of
+  Erased{}    -> setHardCompileTimeModeIfErased erased c
+  NotErased{} -> do
+    warnForPlentyInHardCompileTimeMode erased
+    setRunTimeModeUnlessInHardCompileTimeMode c
+
+-- | Warn if the user explicitly wrote @@ω@ or @@plenty@ but the
+-- current mode is the hard compile-time mode.
+
+warnForPlentyInHardCompileTimeMode :: Erased -> TCM ()
+warnForPlentyInHardCompileTimeMode = \case
+  Erased{}    -> return ()
+  NotErased o -> do
+    let warn = warning $ PlentyInHardCompileTimeMode o
+    hard <- viewTC eHardCompileTimeMode
+    if not hard then return () else case o of
+      QωInferred{} -> return ()
+      Qω{}         -> warn
+      QωPlenty{}   -> warn
+
 -- | Add a constant to the signature. Lifts the definition to top level.
 addConstant :: QName -> Definition -> TCM ()
 addConstant q d = do
   reportSDoc "tc.signature" 20 $ "adding constant " <+> pretty q <+> " to signature"
+
+  -- Every constant that gets added to the signature in hard
+  -- compile-time mode is treated as erased.
+  hard <- viewTC eHardCompileTimeMode
+  d    <- if not hard then return d else do
+    case erasedFromQuantity (getQuantity d) of
+      Nothing     -> __IMPOSSIBLE__
+      Just erased -> do
+        warnForPlentyInHardCompileTimeMode erased
+        return $ mapQuantity (zeroQuantity `composeQuantity`) d
+
   tel <- getContextTelescope
   let tel' = replaceEmptyName "r" $ killRange $ case theDef d of
               Constructor{} -> fmap hideOrKeepInstance tel
@@ -284,7 +371,7 @@ addDisplayForms x = do
 
   -- Turn unfoldings into display forms
   npars <- subtract (projectionArgs def) <$> getContextSize
-  let dfs = catMaybes $ map (displayForm npars v) vs
+  let dfs = map (displayForm npars v) vs
   reportSDoc "tc.display.section" 20 $ nest 2 $ vcat
     [ "displayForms:" <?> vcat [ "-" <+> (pretty y <+> "-->" <?> pretty df) | (y, df) <- dfs ] ]
 
@@ -299,14 +386,16 @@ addDisplayForms x = do
     -- Given an unfolding `top = λ xs → y es` generate a display form
     -- `y es ==> top xs`. The first `npars` variables in `xs` are module parameters
     -- and should not be pattern variables, but matched literally.
-    displayForm :: Nat -> Term -> Term -> Maybe (QName, DisplayForm)
+    displayForm :: Nat -> Term -> Term -> (QName, DisplayForm)
     displayForm npars top v =
       case view v of
-        (xs, Def y es)   -> (y,)         <$> mkDisplay xs es
-        (xs, Con h i es) -> (conName h,) <$> mkDisplay xs es
+        (xs, Def y es)   -> (y,)         $ mkDisplay xs es
+        (xs, Con h i es) -> (conName h,) $ mkDisplay xs es
         _ -> __IMPOSSIBLE__
       where
-        mkDisplay xs es = Just (Display (n - npars) es $ DTerm $ top `apply` args)
+        mkDisplay xs es = Display (n - npars) es $ DTerm $ top `apply` args
+          -- Andreas, 2023-01-26, #6476:
+          -- I think this @apply@ is safe (rather than @DTerm' top (map Apply args)@).
           where
             n    = length xs
             args = zipWith (\ x i -> var i <$ x) xs (downFrom n)
@@ -434,7 +523,15 @@ applySection' new ptel old ts ScopeCopyInfo{ renNames = rd, renModules = rm } = 
       reportSDoc "tc.mod.apply" 80 $ vcat
         [ "copyDef" <+> pretty x <+> "->" <+> pretty y
         , "ts' = " <+> pretty ts' ]
-      copyDef' ts' np def
+      -- The module telescope had been divided by some μ, so the corresponding
+      -- top level definition had type μ \ Γ → B, so if we have a substitution
+      -- Δ → Γ we actually want to apply μ \ - to it, so the new top-level
+      -- definition we get will have signature μ \ Δ → B.  This is only valid
+      -- for pure modality systems though.
+      let ai = defArgInfo def
+          m = unitModality { modCohesion = getCohesion ai }
+      localTC (over eContext (map (mapModality (m `inverseComposeModality`)))) $
+        copyDef' ts' np def
       where
         copyDef' ts np d = do
           reportSDoc "tc.mod.apply" 60 $ "making new def for" <+> pretty y <+> "from" <+> pretty x <+> "with" <+> text (show np) <+> "args" <+> text (show $ defAbstract d)
@@ -455,13 +552,13 @@ applySection' new ptel old ts ScopeCopyInfo{ renNames = rd, renModules = rm } = 
           -- Set display form for the old name if it's not a constructor.
 {- BREAKS fail/Issue478
           -- Andreas, 2012-10-20 and if we are not an anonymous module
-          -- unless (isAnonymousModuleName new || isCon || size ptel > 0) $ do
+          -- unless (isAnonymousModuleName new || isCon || not (null ptel)) $ do
 -}
           -- BREAKS fail/Issue1643a
           -- -- Andreas, 2015-09-09 Issue 1643:
           -- -- Do not add a display form for a bare module alias.
-          -- when (not isCon && size ptel == 0 && not (null ts)) $ do
-          when (size ptel == 0) $ do
+          -- when (not isCon && null ptel && not (null ts)) $ do
+          when (null ptel) $ do
             addDisplayForms y
           where
             ts' = take np ts
@@ -546,11 +643,12 @@ applySection' new ptel old ts ScopeCopyInfo{ renNames = rd, renModules = rm } = 
                 GeneralizableVar -> return GeneralizableVar
                 _ -> do
                   (mst, _, cc) <- compileClauses Nothing [cl] -- Andreas, 2012-10-07 non need for record pattern translation
+                  fun          <- emptyFunctionData
                   let newDef =
                         set funMacro  (oldDef ^. funMacro) $
                         set funStatic (oldDef ^. funStatic) $
                         set funInline True $
-                        FunctionDefn emptyFunctionData
+                        FunctionDefn fun
                         { _funClauses        = [cl]
                         , _funCompiled       = Just cc
                         , _funSplitTree      = mst
@@ -686,22 +784,6 @@ sameDef d1 d2 = do
   c2 <- canonicalName d2
   if (c1 == c2) then return $ Just c1 else return Nothing
 
--- | Can be called on either a (co)datatype, a record type or a
---   (co)constructor.
-whatInduction :: MonadTCM tcm => QName -> tcm Induction
-whatInduction c = liftTCM $ do
-  def <- theDef <$> getConstInfo c
-  mz <- getBuiltinName' builtinIZero
-  mo <- getBuiltinName' builtinIOne
-  case def of
-    Datatype{}                    -> return Inductive
-    Record{} | not (recRecursive def) -> return Inductive
-    Record{ recInduction = i    } -> return $ fromMaybe Inductive i
-    Constructor{ conInd = i }     -> return i
-    _ | Just c == mz || Just c == mo
-                                  -> return Inductive
-    _                             -> __IMPOSSIBLE__
-
 -- | Does the given constructor come from a single-constructor type?
 --
 -- Precondition: The name has to refer to a constructor.
@@ -714,7 +796,7 @@ singleConstructorType q = do
       di <- theDef <$> getConstInfo d
       return $ case di of
         Record {}                  -> True
-        Datatype { dataCons = cs } -> length cs == 1
+        Datatype { dataCons = cs } -> natSize cs == 1
         _                          -> __IMPOSSIBLE__
     _ -> __IMPOSSIBLE__
 
@@ -722,12 +804,35 @@ singleConstructorType q = do
 data SigError
   = SigUnknown String -- ^ The name is not in the signature; default error message.
   | SigAbstract       -- ^ The name is not available, since it is abstract.
+  | SigCubicalNotErasure
+    -- ^ The name is not available because it was defined in Cubical
+    -- Agda, but the current language is Erased Cubical Agda, and
+    -- @--erasure@ is not active.
 
--- | Standard eliminator for 'SigError'.
-sigError :: (String -> a) -> a -> SigError -> a
-sigError f a = \case
-  SigUnknown s -> f s
-  SigAbstract  -> a
+-- | Generates an error message corresponding to
+-- 'SigCubicalNotErasure' for a given 'QName'.
+notSoPrettySigCubicalNotErasure :: QName -> String
+notSoPrettySigCubicalNotErasure q =
+  "The name " ++ prettyShow q ++ " which was defined in Cubical " ++
+  "Agda can only be used in Erased Cubical Agda if the option " ++
+  "--erasure is used"
+
+-- | Generates an error message corresponding to
+-- 'SigCubicalNotErasure' for a given 'QName'.
+prettySigCubicalNotErasure :: MonadPretty m => QName -> m Doc
+prettySigCubicalNotErasure q = fsep $
+  pwords "The name" ++
+  [prettyTCM q] ++
+  pwords "which was defined in Cubical Agda can only be used in" ++
+  pwords "Erased Cubical Agda if the option --erasure is used"
+
+-- | An eliminator for 'SigError'. All constructors except for
+-- 'SigAbstract' are assumed to be impossible.
+sigError :: (HasCallStack, MonadDebug m) => m a -> SigError -> m a
+sigError a = \case
+  SigUnknown s         -> __IMPOSSIBLE_VERBOSE__ s
+  SigAbstract          -> a
+  SigCubicalNotErasure -> __IMPOSSIBLE__
 
 class ( Functor m
       , Applicative m
@@ -744,6 +849,8 @@ class ( Functor m
       Left (SigUnknown err) -> __IMPOSSIBLE_VERBOSE__ err
       Left SigAbstract      -> __IMPOSSIBLE_VERBOSE__ $
         "Abstract, thus, not in scope: " ++ prettyShow q
+      Left SigCubicalNotErasure -> __IMPOSSIBLE_VERBOSE__ $
+        notSoPrettySigCubicalNotErasure q
 
   -- | Version that reports exceptions:
   getConstInfo' :: QName -> m (Either SigError Definition)
@@ -779,8 +886,8 @@ getOriginalConstInfo q = do
   case (lang, defLanguage def) of
     (Cubical CErased, Cubical CFull) ->
       locallyTCState
-        stPragmaOptions
-        (\opts -> opts { optCubical = Just CFull })
+        (stPragmaOptions . lensOptCubical)
+        (const $ Just CFull)
         (getConstInfo q)
     _ -> return def
 
@@ -805,8 +912,10 @@ instance HasConstInfo (TCMT IO) where
     defaultGetConstInfo st env q
   getConstInfo q = getConstInfo' q >>= \case
       Right d -> return d
-      Left (SigUnknown err) -> fail err
-      Left SigAbstract      -> notInScopeError $ qnameToConcrete q
+      Left (SigUnknown err)     -> fail err
+      Left SigAbstract          -> notInScopeError $ qnameToConcrete q
+      Left SigCubicalNotErasure ->
+        typeError . GenericDocError =<< prettySigCubicalNotErasure q
 
 defaultGetConstInfo
   :: (HasOptions m, MonadDebug m, MonadTCEnv m)
@@ -816,12 +925,17 @@ defaultGetConstInfo st env q = do
         idefs = st^.(stImports . sigDefinitions)
     case catMaybes [HMap.lookup q defs, HMap.lookup q idefs] of
         []  -> return $ Left $ SigUnknown $ "Unbound name: " ++ prettyShow q ++ showQNameId q
-        [d] -> mkAbs env =<< fixQuantity d
+        [d] -> checkErasureFixQuantity d >>= \case
+                 Left err -> return (Left err)
+                 Right d  -> mkAbs env d
         ds  -> __IMPOSSIBLE_VERBOSE__ $ "Ambiguous name: " ++ prettyShow q
     where
       mkAbs env d
-        | treatAbstractly' q' env =
-          case makeAbstract d of
+        -- Apply the reducibility rules (abstract, opaque) to check
+        -- whether the definition should be hidden behind an
+        -- 'AbstractDef'.
+        | not (isAccessibleDef env st d{defName = q'}) =
+          case alwaysMakeAbstract d of
             Just d      -> return $ Right d
             Nothing     -> return $ Left SigAbstract
               -- the above can happen since the scope checker is a bit sloppy with 'abstract'
@@ -839,15 +953,20 @@ defaultGetConstInfo st env q = do
                  initWithDefault __IMPOSSIBLE__ $ mnameToList m
              }
 
-      -- Names defined when --cubical is active are (to a large
-      -- degree) treated as erased when --erased-cubical is used.
-      fixQuantity d = do
+      -- Names defined in Cubical Agda may only be used in Erased
+      -- Cubical Agda if --erasure is used. In that case they are (to
+      -- a large degree) treated as erased.
+      checkErasureFixQuantity d = do
         current <- getLanguage
-        return $
-          if defLanguage d == Cubical CFull &&
-             current == Cubical CErased
-          then setQuantity zeroQuantity d
-          else d
+        if defLanguage d == Cubical CFull &&
+           current == Cubical CErased
+        then do
+          erasure <- optErasure <$> pragmaOptions
+          return $
+            if erasure
+            then Right $ setQuantity zeroQuantity d
+            else Left SigCubicalNotErasure
+        else return $ Right d
 
 -- HasConstInfo lifts through monad transformers
 -- (see default signatures in HasConstInfo class).
@@ -1136,17 +1255,16 @@ instantiateRewriteRules :: (Functor m, HasConstInfo m, HasOptions m,
                         => RewriteRules -> m RewriteRules
 instantiateRewriteRules = mapM instantiateRewriteRule
 
--- | Give the abstract view of a definition.
-makeAbstract :: Definition -> Maybe Definition
-makeAbstract d =
-  case defAbstract d of
-    ConcreteDef -> return d
-    AbstractDef -> do
-      def <- makeAbs $ theDef d
-      return d { defArgOccurrences = [] -- no positivity info for abstract things!
-               , defPolarity       = [] -- no polarity info for abstract things!
-               , theDef = def
-               }
+-- | Return the abstract view of a definition, /regardless/ of whether
+-- the definition would be treated abstractly.
+alwaysMakeAbstract :: Definition -> Maybe Definition
+alwaysMakeAbstract d =
+  do
+    def <- makeAbs $ theDef d
+    pure d { defArgOccurrences = [] -- no positivity info for abstract things!
+           , defPolarity       = [] -- no polarity info for abstract things!
+           , theDef = def
+           }
   where
     makeAbs d@Axiom{}            = Just d
     makeAbs d@DataOrRecSig{}     = Just d
@@ -1161,7 +1279,7 @@ makeAbstract d =
     makeAbs d@Record{}    = Just $ AbstractDefn d
     makeAbs Primitive{}   = __IMPOSSIBLE__
     makeAbs PrimitiveSort{} = __IMPOSSIBLE__
-    makeAbs AbstractDefn{}= __IMPOSSIBLE__
+    makeAbs AbstractDefn{} = __IMPOSSIBLE__
 
 -- | Enter abstract mode. Abstract definition in the current module are transparent.
 {-# SPECIALIZE inAbstractMode :: TCM a -> TCM a #-}
@@ -1177,44 +1295,35 @@ inConcreteMode = localTC $ \e -> e { envAbstractMode = ConcreteMode }
 ignoreAbstractMode :: MonadTCEnv m => m a -> m a
 ignoreAbstractMode = localTC $ \e -> e { envAbstractMode = IgnoreAbstractMode }
 
--- | Enter concrete or abstract mode depending on whether the given identifier
---   is concrete or abstract.
+-- | Go under the given opaque block. The unfolding set will turn opaque
+-- definitions transparent.
+{-# SPECIALIZE underOpaqueId :: OpaqueId -> TCM a -> TCM a #-}
+underOpaqueId :: MonadTCEnv m => OpaqueId -> m a -> m a
+underOpaqueId i = localTC $ \e -> e { envCurrentOpaqueId = Just i }
+
+-- | Outside of any opaque blocks.
+{-# SPECIALIZE notUnderOpaque :: TCM a -> TCM a #-}
+notUnderOpaque :: MonadTCEnv m => m a -> m a
+notUnderOpaque = localTC $ \e -> e { envCurrentOpaqueId = Nothing }
+
+-- | Enter the reducibility environment associated with a definition:
+-- The environment will have the same concreteness as the name, and we
+-- will be in the opaque block enclosing the name, if any.
 {-# SPECIALIZE inConcreteOrAbstractMode :: QName -> (Definition -> TCM a) -> TCM a #-}
 inConcreteOrAbstractMode :: (MonadTCEnv m, HasConstInfo m) => QName -> (Definition -> m a) -> m a
 inConcreteOrAbstractMode q cont = do
   -- Andreas, 2015-07-01: If we do not ignoreAbstractMode here,
   -- we will get ConcreteDef for abstract things, as they are turned into axioms.
   def <- ignoreAbstractMode $ getConstInfo q
-  case defAbstract def of
-    AbstractDef -> inAbstractMode $ cont def
-    ConcreteDef -> inConcreteMode $ cont def
+  let
+    k1 = case defAbstract def of
+      AbstractDef -> inAbstractMode
+      ConcreteDef -> inConcreteMode
 
--- | Check whether a name might have to be treated abstractly (either if we're
---   'inAbstractMode' or it's not a local name). Returns true for things not
---   declared abstract as well, but for those 'makeAbstract' will have no effect.
-treatAbstractly :: MonadTCEnv m => QName -> m Bool
-treatAbstractly q = asksTC $ treatAbstractly' q
-
--- | Andreas, 2015-07-01:
---   If the @current@ module is a weak suffix of the identifier module,
---   we can see through its abstract definition if we are abstract.
---   (Then @treatAbstractly'@ returns @False@).
---
---   If I am not mistaken, then we cannot see definitions in the @where@
---   block of an abstract function from the perspective of the function,
---   because then the current module is a strict prefix of the module
---   of the local identifier.
---   This problem is fixed by removing trailing anonymous module name parts
---   (underscores) from both names.
-treatAbstractly' :: QName -> TCEnv -> Bool
-treatAbstractly' q env = case envAbstractMode env of
-  ConcreteMode       -> True
-  IgnoreAbstractMode -> False
-  AbstractMode       -> not $ current `isLeChildModuleOf` m
-  where
-    current = dropAnon $ envCurrentModule env
-    m       = dropAnon $ qnameModule q
-    dropAnon (MName ms) = MName $ List.dropWhileEnd isNoName ms
+    k2 = case defOpaque def of
+      OpaqueDef i    -> underOpaqueId i
+      TransparentDef -> notUnderOpaque
+  k2 (k1 (cont def))
 
 -- | Get type of a constant, instantiated to the current context.
 {-# SPECIALIZE typeOfConst :: QName -> TCM Type #-}

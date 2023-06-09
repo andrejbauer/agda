@@ -170,12 +170,14 @@ quotingKit = do
       quoteSort :: Sort -> ReduceM Term
       quoteSort (Type t) = quoteSortLevelTerm setLit set t
       quoteSort (Prop t) = quoteSortLevelTerm propLit prop t
-      quoteSort (Inf f n) = case f of
-        IsFibrant -> inf !@! Lit (LitNat n)
-        IsStrict  -> pure unsupportedSort
+      quoteSort (Inf u n) = case u of
+        UType -> inf !@! Lit (LitNat n)
+        UProp -> pure unsupportedSort
+        USSet -> pure unsupportedSort
       quoteSort SSet{}   = pure unsupportedSort
       quoteSort SizeUniv = pure unsupportedSort
       quoteSort LockUniv = pure unsupportedSort
+      quoteSort LevelUniv = pure unsupportedSort
       quoteSort IntervalUniv = pure unsupportedSort
       quoteSort PiSort{} = pure unsupportedSort
       quoteSort FunSort{} = pure unsupportedSort

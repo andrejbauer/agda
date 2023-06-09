@@ -123,20 +123,20 @@ data ModuleAssignment  = ModuleAssignment
 type RecordAssignment  = Either FieldAssignment ModuleAssignment
 type RecordAssignments = [RecordAssignment]
 
-nameFieldA :: Lens' Name (FieldAssignment' a)
+nameFieldA :: Lens' (FieldAssignment' a) Name
 nameFieldA f r = f (_nameFieldA r) <&> \x -> r { _nameFieldA = x }
 
-exprFieldA :: Lens' a (FieldAssignment' a)
+exprFieldA :: Lens' (FieldAssignment' a) a
 exprFieldA f r = f (_exprFieldA r) <&> \x -> r { _exprFieldA = x }
 
 -- UNUSED Liang-Ting Chen 2019-07-16
---qnameModA :: Lens' QName ModuleAssignment
+--qnameModA :: Lens' ModuleAssignment QName
 --qnameModA f r = f (_qnameModA r) <&> \x -> r { _qnameModA = x }
 --
 --exprModA :: Lens' [Expr] ModuleAssignment
 --exprModA f r = f (_exprModA r) <&> \x -> r { _exprModA = x }
 --
---importDirModA :: Lens' ImportDirective ModuleAssignment
+--importDirModA :: Lens' ModuleAssignment ImportDirective
 --importDirModA f r = f (_importDirModA r) <&> \x -> r { _importDirModA = x }
 
 -- | Concrete expressions. Should represent exactly what the user wrote.
@@ -184,7 +184,16 @@ type OpAppArgs' e = [NamedArg (MaybePlaceholder (OpApp e))]
 
 -- | Concrete patterns. No literals in patterns at the moment.
 data Pattern
-  = IdentP QName                           -- ^ @c@ or @x@
+  = IdentP Bool QName                      -- ^ @c@ or @x@
+                                           --
+                                           -- If the boolean is
+                                           -- 'False', then the
+                                           -- 'QName' must not refer
+                                           -- to a constructor or a
+                                           -- pattern synonym. The
+                                           -- value 'False' is used
+                                           -- when a hidden argument
+                                           -- pun is expanded.
   | QuoteP Range                           -- ^ @quote@
   | AppP Pattern (NamedArg Pattern)        -- ^ @p p'@ or @p {x = p'}@
   | RawAppP Range (List2 Pattern)          -- ^ @p1..pn@ before parsing operators
@@ -368,7 +377,7 @@ data WhereClause' decls
   | AnyWhere Range decls
       -- ^ Ordinary @where@.  'Range' of the @where@ keyword.
       --   List of declarations can be empty.
-  | SomeWhere Range Name Access decls
+  | SomeWhere Range Erased Name Access decls
       -- ^ Named where: @module M where ds@.
       --   'Range' of the keywords @module@ and @where@.
       --   The 'Access' flag applies to the 'Name' (not the module contents!)
@@ -448,12 +457,14 @@ data Declaration
   | Generalize Range [TypeSignature] -- ^ Variables to be generalized, can be hidden and/or irrelevant.
   | Field Range [FieldSignature]
   | FunClause LHS RHS WhereClause Bool
-  | DataSig     Range Name [LamBinding] Expr -- ^ lone data signature in mutual block
-  | Data        Range Name [LamBinding] Expr [TypeSignatureOrInstanceBlock]
+  | DataSig     Range Erased Name [LamBinding] Expr -- ^ lone data signature in mutual block
+  | Data        Range Erased Name [LamBinding] Expr
+                [TypeSignatureOrInstanceBlock]
   | DataDef     Range Name [LamBinding] [TypeSignatureOrInstanceBlock]
-  | RecordSig   Range Name [LamBinding] Expr -- ^ lone record signature in mutual block
+  | RecordSig   Range Erased Name [LamBinding] Expr -- ^ lone record signature in mutual block
   | RecordDef   Range Name RecordDirectives [LamBinding] [Declaration]
-  | Record      Range Name RecordDirectives [LamBinding] Expr [Declaration]
+  | Record      Range Erased Name RecordDirectives [LamBinding] Expr
+                [Declaration]
   | RecordDirective RecordDirective -- ^ Should not survive beyond the parser
   | Infix Fixity (List1 Name)
   | Syntax      Name Notation -- ^ notation declaration for a name
@@ -475,8 +486,9 @@ data Declaration
   | Primitive   Range [TypeSignature]
   | Open        Range QName ImportDirective
   | Import      Range QName (Maybe AsName) !OpenShortHand ImportDirective
-  | ModuleMacro Range  Name ModuleApplication !OpenShortHand ImportDirective
-  | Module      Range QName Telescope [Declaration]
+  | ModuleMacro Range Erased  Name ModuleApplication !OpenShortHand
+                ImportDirective
+  | Module      Range Erased QName Telescope [Declaration]
   | UnquoteDecl Range [Name] Expr
       -- ^ @unquoteDecl xs = e@
   | UnquoteDef  Range [Name] Expr
@@ -484,6 +496,10 @@ data Declaration
   | UnquoteData Range Name [Name] Expr
       -- ^ @unquoteDecl data d constructor xs = e@
   | Pragma      Pragma
+  | Opaque      Range [Declaration]
+    -- ^ @opaque ...@
+  | Unfolding   Range [QName]
+    -- ^ @unfolding ...@
   deriving Eq
 
 -- | Extract a record directive
@@ -629,10 +645,10 @@ unAppView (AppView e nargs) = rawApp (e :| map unNamedArg nargs)
 
 isSingleIdentifierP :: Pattern -> Maybe Name
 isSingleIdentifierP = \case
-  IdentP (QName x) -> Just x
-  WildP r          -> Just $ noName r
-  ParenP _ p       -> isSingleIdentifierP p
-  _                -> Nothing
+  IdentP _ (QName x) -> Just x
+  WildP r            -> Just $ noName r
+  ParenP _ p         -> isSingleIdentifierP p
+  _                  -> Nothing
 
 removeParenP :: Pattern -> Pattern
 removeParenP = \case
@@ -687,7 +703,7 @@ exprToPattern :: Applicative m
 exprToPattern fallback = loop
   where
   loop = \case
-    Ident       x        -> pure $ IdentP x
+    Ident       x        -> pure $ IdentP True x
     App         _ e1 e2  -> AppP <$> loop e1 <*> traverse (traverse loop) e2
     Paren       r e      -> ParenP r <$> loop e
     Underscore  r _      -> pure $ WildP r
@@ -741,7 +757,8 @@ isAbsurdP = \case
 
 isBinderP :: Pattern -> Maybe Binder
 isBinderP = \case
-  IdentP qn  -> mkBinder_ <$> isUnqualified qn
+  IdentP _ qn
+             -> mkBinder_ <$> isUnqualified qn
   WildP r    -> pure $ mkBinder_ $ setRange r simpleHole
   AsP r n p  -> pure $ Binder (Just p) $ mkBoundName_ n
   ParenP r p -> pure $ Binder (Just p) $ mkBoundName_ $ setRange r simpleHole
@@ -847,9 +864,9 @@ instance HasRange BoundName where
   getRange = getRange . boundName
 
 instance HasRange WhereClause where
-  getRange  NoWhere             = noRange
-  getRange (AnyWhere r ds)      = getRange (r, ds)
-  getRange (SomeWhere r x _ ds) = getRange (r, x, ds)
+  getRange  NoWhere               = noRange
+  getRange (AnyWhere r ds)        = getRange (r, ds)
+  getRange (SomeWhere r e x _ ds) = getRange (r, e, x, ds)
 
 instance HasRange ModuleApplication where
   getRange (SectionApp r _ _) = r
@@ -872,12 +889,12 @@ instance HasRange Declaration where
   getRange (FieldSig _ _ x t)      = fuseRange x t
   getRange (Field r _)             = r
   getRange (FunClause lhs rhs wh _) = fuseRange lhs rhs `fuseRange` wh
-  getRange (DataSig r _ _ _)       = r
-  getRange (Data r _ _ _ _)        = r
+  getRange (DataSig r _ _ _ _)     = r
+  getRange (Data r _ _ _ _ _)      = r
   getRange (DataDef r _ _ _)       = r
-  getRange (RecordSig r _ _ _)     = r
+  getRange (RecordSig r _ _ _ _)   = r
   getRange (RecordDef r _ _ _ _)   = r
-  getRange (Record r _ _ _ _ _)    = r
+  getRange (Record r _ _ _ _ _ _)  = r
   getRange (RecordDirective r)     = getRange r
   getRange (Mutual r _)            = r
   getRange (InterleavedMutual r _) = r
@@ -885,14 +902,15 @@ instance HasRange Declaration where
   getRange (Abstract r _)          = r
   getRange (Generalize r _)        = r
   getRange (Open r _ _)            = r
-  getRange (ModuleMacro r _ _ _ _) = r
+  getRange (ModuleMacro r _ _ _ _ _)
+                                   = r
   getRange (Import r _ _ _ _)      = r
   getRange (InstanceB r _)         = r
   getRange (Macro r _)             = r
   getRange (Private r _ _)         = r
   getRange (Postulate r _)         = r
   getRange (Primitive r _)         = r
-  getRange (Module r _ _ _)        = r
+  getRange (Module r _ _ _ _)      = r
   getRange (Infix f _)             = getRange f
   getRange (Syntax n _)            = getRange n
   getRange (PatternSyn r _ _ _)    = r
@@ -900,6 +918,8 @@ instance HasRange Declaration where
   getRange (UnquoteDef r _ _)      = r
   getRange (UnquoteData r _ _ _)   = r
   getRange (Pragma p)              = getRange p
+  getRange (Opaque r _)            = r
+  getRange (Unfolding r _)         = r
 
 instance HasRange LHS where
   getRange (LHS p eqns ws) = p `fuseRange` eqns `fuseRange` ws
@@ -948,7 +968,7 @@ instance HasRange AsName where
   getRange a = getRange (asRange a, asName a)
 
 instance HasRange Pattern where
-  getRange (IdentP x)         = getRange x
+  getRange (IdentP _ x)       = getRange x
   getRange (AppP p q)         = fuseRange p q
   getRange (OpAppP r _ _ _)   = r
   getRange (RawAppP r _)      = r
@@ -970,7 +990,7 @@ instance HasRange Pattern where
 ------------------------------------------------------------------------
 
 instance SetRange Pattern where
-  setRange r (IdentP x)         = IdentP (setRange r x)
+  setRange r (IdentP c x)       = IdentP c (setRange r x)
   setRange r (AppP p q)         = AppP (setRange r p) (setRange r q)
   setRange r (OpAppP _ x ns ps) = OpAppP r x ns ps
   setRange r (RawAppP _ ps)     = RawAppP r ps
@@ -996,145 +1016,151 @@ instance SetRange TypedBinding where
 ------------------------------------------------------------------------
 
 instance KillRange a => KillRange (FieldAssignment' a) where
-  killRange (FieldAssignment a b) = killRange2 FieldAssignment a b
+  killRange (FieldAssignment a b) = killRangeN FieldAssignment a b
 
 instance KillRange ModuleAssignment where
-  killRange (ModuleAssignment a b c) = killRange3 ModuleAssignment a b c
+  killRange (ModuleAssignment a b c) = killRangeN ModuleAssignment a b c
 
 instance KillRange AsName where
-  killRange (AsName n _) = killRange1 (flip AsName noRange) n
+  killRange (AsName n _) = killRangeN (flip AsName noRange) n
 
 instance KillRange Binder where
-  killRange (Binder a b) = killRange2 Binder a b
+  killRange (Binder a b) = killRangeN Binder a b
 
 instance KillRange BoundName where
-  killRange (BName n f t b) = killRange4 BName n f t b
+  killRange (BName n f t b) = killRangeN BName n f t b
 
 instance KillRange RecordDirective where
-  killRange (Induction a)          = killRange1 Induction a
-  killRange (Eta a    )            = killRange1 Eta a
-  killRange (Constructor a b)      = killRange2 Constructor a b
+  killRange (Induction a)          = killRangeN Induction a
+  killRange (Eta a    )            = killRangeN Eta a
+  killRange (Constructor a b)      = killRangeN Constructor a b
   killRange (PatternOrCopattern _) = PatternOrCopattern noRange
 
 instance KillRange Declaration where
-  killRange (TypeSig i t n e)       = killRange3 (TypeSig i) t n e
-  killRange (FieldSig i t n e)      = killRange4 FieldSig i t n e
-  killRange (Generalize r ds )      = killRange1 (Generalize noRange) ds
-  killRange (Field r fs)            = killRange1 (Field noRange) fs
-  killRange (FunClause l r w ca)    = killRange4 FunClause l r w ca
-  killRange (DataSig _ n l e)       = killRange3 (DataSig noRange) n l e
-  killRange (Data _ n l e c)        = killRange4 (Data noRange) n l e c
-  killRange (DataDef _ n l c)       = killRange3 (DataDef noRange) n l c
-  killRange (RecordSig _ n l e)     = killRange3 (RecordSig noRange) n l e
-  killRange (RecordDef _ n dir k d) = killRange4 (RecordDef noRange) n dir k d
-  killRange (RecordDirective a)     = killRange1 RecordDirective a
-  killRange (Record _ n dir k e d)  = killRange5 (Record noRange) n dir k e d
-  killRange (Infix f n)             = killRange2 Infix f n
-  killRange (Syntax n no)           = killRange1 (\n -> Syntax n no) n
-  killRange (PatternSyn _ n ns p)   = killRange3 (PatternSyn noRange) n ns p
-  killRange (Mutual _ d)            = killRange1 (Mutual noRange) d
-  killRange (InterleavedMutual _ d) = killRange1 (InterleavedMutual noRange) d
-  killRange (LoneConstructor _ d)   = killRange1 (LoneConstructor noRange) d
-  killRange (Abstract _ d)          = killRange1 (Abstract noRange) d
-  killRange (Private _ o d)         = killRange2 (Private noRange) o d
-  killRange (InstanceB _ d)         = killRange1 (InstanceB noRange) d
-  killRange (Macro _ d)             = killRange1 (Macro noRange) d
-  killRange (Postulate _ t)         = killRange1 (Postulate noRange) t
-  killRange (Primitive _ t)         = killRange1 (Primitive noRange) t
-  killRange (Open _ q i)            = killRange2 (Open noRange) q i
-  killRange (Import _ q a o i)      = killRange3 (\q a -> Import noRange q a o) q a i
-  killRange (ModuleMacro _ n m o i) = killRange3 (\n m -> ModuleMacro noRange n m o) n m i
-  killRange (Module _ q t d)        = killRange3 (Module noRange) q t d
-  killRange (UnquoteDecl _ x t)     = killRange2 (UnquoteDecl noRange) x t
-  killRange (UnquoteDef _ x t)      = killRange2 (UnquoteDef noRange) x t
-  killRange (UnquoteData _ xs cs t) = killRange3 (UnquoteData noRange) xs cs t
-  killRange (Pragma p)              = killRange1 Pragma p
+  killRange (TypeSig i t n e)       = killRangeN (TypeSig i) t n e
+  killRange (FieldSig i t n e)      = killRangeN FieldSig i t n e
+  killRange (Generalize r ds )      = killRangeN (Generalize noRange) ds
+  killRange (Field r fs)            = killRangeN (Field noRange) fs
+  killRange (FunClause l r w ca)    = killRangeN FunClause l r w ca
+  killRange (DataSig _ er n l e)    = killRangeN (DataSig noRange) er n l e
+  killRange (Data _ er n l e c)     = killRangeN (Data noRange) er n l e c
+  killRange (DataDef _ n l c)       = killRangeN (DataDef noRange) n l c
+  killRange (RecordSig _ er n l e)  = killRangeN (RecordSig noRange) er n l e
+  killRange (RecordDef _ n dir k d) = killRangeN (RecordDef noRange) n dir k d
+  killRange (RecordDirective a)     = killRangeN RecordDirective a
+  killRange (Record _ er n dir k e d)
+                                    = killRangeN (Record noRange) er n dir k e d
+  killRange (Infix f n)             = killRangeN Infix f n
+  killRange (Syntax n no)           = killRangeN (\n -> Syntax n no) n
+  killRange (PatternSyn _ n ns p)   = killRangeN (PatternSyn noRange) n ns p
+  killRange (Mutual _ d)            = killRangeN (Mutual noRange) d
+  killRange (InterleavedMutual _ d) = killRangeN (InterleavedMutual noRange) d
+  killRange (LoneConstructor _ d)   = killRangeN (LoneConstructor noRange) d
+  killRange (Abstract _ d)          = killRangeN (Abstract noRange) d
+  killRange (Private _ o d)         = killRangeN (Private noRange) o d
+  killRange (InstanceB _ d)         = killRangeN (InstanceB noRange) d
+  killRange (Macro _ d)             = killRangeN (Macro noRange) d
+  killRange (Postulate _ t)         = killRangeN (Postulate noRange) t
+  killRange (Primitive _ t)         = killRangeN (Primitive noRange) t
+  killRange (Open _ q i)            = killRangeN (Open noRange) q i
+  killRange (Import _ q a o i)      = killRangeN (\q a -> Import noRange q a o) q a i
+  killRange (ModuleMacro _ e n m o i)
+                                    = killRangeN
+                                        (\e n m -> ModuleMacro noRange e n m o)
+                                        e n m i
+  killRange (Module _ e q t d)      = killRangeN (Module noRange) e q t d
+  killRange (UnquoteDecl _ x t)     = killRangeN (UnquoteDecl noRange) x t
+  killRange (UnquoteDef _ x t)      = killRangeN (UnquoteDef noRange) x t
+  killRange (UnquoteData _ xs cs t) = killRangeN (UnquoteData noRange) xs cs t
+  killRange (Pragma p)              = killRangeN Pragma p
+  killRange (Opaque r xs)           = killRangeN Opaque r xs
+  killRange (Unfolding r xs)        = killRangeN Unfolding r xs
 
 instance KillRange Expr where
-  killRange (Ident q)             = killRange1 Ident q
-  killRange (Lit _ l)             = killRange1 (Lit noRange) l
+  killRange (Ident q)             = killRangeN Ident q
+  killRange (Lit _ l)             = killRangeN (Lit noRange) l
   killRange (QuestionMark _ n)    = QuestionMark noRange n
   killRange (Underscore _ n)      = Underscore noRange n
-  killRange (RawApp _ e)          = killRange1 (RawApp noRange) e
-  killRange (App _ e a)           = killRange2 (App noRange) e a
-  killRange (OpApp _ n ns o)      = killRange3 (OpApp noRange) n ns o
-  killRange (WithApp _ e es)      = killRange2 (WithApp noRange) e es
-  killRange (HiddenArg _ n)       = killRange1 (HiddenArg noRange) n
-  killRange (InstanceArg _ n)     = killRange1 (InstanceArg noRange) n
-  killRange (Lam _ l e)           = killRange2 (Lam noRange) l e
-  killRange (AbsurdLam _ h)       = killRange1 (AbsurdLam noRange) h
-  killRange (ExtendedLam _ e lrw) = killRange2 (ExtendedLam noRange) e lrw
-  killRange (Fun _ e1 e2)         = killRange2 (Fun noRange) e1 e2
-  killRange (Pi t e)              = killRange2 Pi t e
-  killRange (Rec _ ne)            = killRange1 (Rec noRange) ne
-  killRange (RecUpdate _ e ne)    = killRange2 (RecUpdate noRange) e ne
-  killRange (Let _ d e)           = killRange2 (Let noRange) d e
-  killRange (Paren _ e)           = killRange1 (Paren noRange) e
-  killRange (IdiomBrackets _ es)  = killRange1 (IdiomBrackets noRange) es
-  killRange (DoBlock _ ss)        = killRange1 (DoBlock noRange) ss
+  killRange (RawApp _ e)          = killRangeN (RawApp noRange) e
+  killRange (App _ e a)           = killRangeN (App noRange) e a
+  killRange (OpApp _ n ns o)      = killRangeN (OpApp noRange) n ns o
+  killRange (WithApp _ e es)      = killRangeN (WithApp noRange) e es
+  killRange (HiddenArg _ n)       = killRangeN (HiddenArg noRange) n
+  killRange (InstanceArg _ n)     = killRangeN (InstanceArg noRange) n
+  killRange (Lam _ l e)           = killRangeN (Lam noRange) l e
+  killRange (AbsurdLam _ h)       = killRangeN (AbsurdLam noRange) h
+  killRange (ExtendedLam _ e lrw) = killRangeN (ExtendedLam noRange) e lrw
+  killRange (Fun _ e1 e2)         = killRangeN (Fun noRange) e1 e2
+  killRange (Pi t e)              = killRangeN Pi t e
+  killRange (Rec _ ne)            = killRangeN (Rec noRange) ne
+  killRange (RecUpdate _ e ne)    = killRangeN (RecUpdate noRange) e ne
+  killRange (Let _ d e)           = killRangeN (Let noRange) d e
+  killRange (Paren _ e)           = killRangeN (Paren noRange) e
+  killRange (IdiomBrackets _ es)  = killRangeN (IdiomBrackets noRange) es
+  killRange (DoBlock _ ss)        = killRangeN (DoBlock noRange) ss
   killRange (Absurd _)            = Absurd noRange
-  killRange (As _ n e)            = killRange2 (As noRange) n e
-  killRange (Dot _ e)             = killRange1 (Dot noRange) e
-  killRange (DoubleDot _ e)       = killRange1 (DoubleDot noRange) e
+  killRange (As _ n e)            = killRangeN (As noRange) n e
+  killRange (Dot _ e)             = killRangeN (Dot noRange) e
+  killRange (DoubleDot _ e)       = killRangeN (DoubleDot noRange) e
   killRange (Quote _)             = Quote noRange
   killRange (QuoteTerm _)         = QuoteTerm noRange
   killRange (Unquote _)           = Unquote noRange
-  killRange (Tactic _ t)          = killRange1 (Tactic noRange) t
-  killRange (DontCare e)          = killRange1 DontCare e
+  killRange (Tactic _ t)          = killRangeN (Tactic noRange) t
+  killRange (DontCare e)          = killRangeN DontCare e
   killRange (Equal _ x y)         = Equal noRange x y
   killRange (Ellipsis _)          = Ellipsis noRange
-  killRange (Generalized e)       = killRange1 Generalized e
+  killRange (Generalized e)       = killRangeN Generalized e
 
 instance KillRange LamBinding where
-  killRange (DomainFree b) = killRange1 DomainFree b
-  killRange (DomainFull t) = killRange1 DomainFull t
+  killRange (DomainFree b) = killRangeN DomainFree b
+  killRange (DomainFull t) = killRangeN DomainFull t
 
 instance KillRange LHS where
-  killRange (LHS p r w)  = killRange3 LHS p r w
+  killRange (LHS p r w)  = killRangeN LHS p r w
 
 instance KillRange LamClause where
-  killRange (LamClause a b c) = killRange3 LamClause a b c
+  killRange (LamClause a b c) = killRangeN LamClause a b c
 
 instance KillRange DoStmt where
-  killRange (DoBind r p e w) = killRange4 DoBind r p e w
-  killRange (DoThen e)       = killRange1 DoThen e
-  killRange (DoLet r ds)     = killRange2 DoLet r ds
+  killRange (DoBind r p e w) = killRangeN DoBind r p e w
+  killRange (DoThen e)       = killRangeN DoThen e
+  killRange (DoLet r ds)     = killRangeN DoLet r ds
 
 instance KillRange ModuleApplication where
-  killRange (SectionApp _ t e)    = killRange2 (SectionApp noRange) t e
-  killRange (RecordModuleInstance _ q) = killRange1 (RecordModuleInstance noRange) q
+  killRange (SectionApp _ t e)    = killRangeN (SectionApp noRange) t e
+  killRange (RecordModuleInstance _ q) = killRangeN (RecordModuleInstance noRange) q
 
 instance KillRange e => KillRange (OpApp e) where
-  killRange (SyntaxBindingLambda _ l e) = killRange2 (SyntaxBindingLambda noRange) l e
-  killRange (Ordinary e)                = killRange1 Ordinary e
+  killRange (SyntaxBindingLambda _ l e) = killRangeN (SyntaxBindingLambda noRange) l e
+  killRange (Ordinary e)                = killRangeN Ordinary e
 
 instance KillRange Pattern where
-  killRange (IdentP q)        = killRange1 IdentP q
-  killRange (AppP p ps)       = killRange2 AppP p ps
-  killRange (RawAppP _ p)     = killRange1 (RawAppP noRange) p
-  killRange (OpAppP _ n ns p) = killRange3 (OpAppP noRange) n ns p
-  killRange (HiddenP _ n)     = killRange1 (HiddenP noRange) n
-  killRange (InstanceP _ n)   = killRange1 (InstanceP noRange) n
-  killRange (ParenP _ p)      = killRange1 (ParenP noRange) p
+  killRange (IdentP c q)      = killRangeN IdentP c q
+  killRange (AppP p ps)       = killRangeN AppP p ps
+  killRange (RawAppP _ p)     = killRangeN (RawAppP noRange) p
+  killRange (OpAppP _ n ns p) = killRangeN (OpAppP noRange) n ns p
+  killRange (HiddenP _ n)     = killRangeN (HiddenP noRange) n
+  killRange (InstanceP _ n)   = killRangeN (InstanceP noRange) n
+  killRange (ParenP _ p)      = killRangeN (ParenP noRange) p
   killRange (WildP _)         = WildP noRange
   killRange (AbsurdP _)       = AbsurdP noRange
-  killRange (AsP _ n p)       = killRange2 (AsP noRange) n p
-  killRange (DotP _ e)        = killRange1 (DotP noRange) e
-  killRange (LitP _ l)        = killRange1 (LitP noRange) l
+  killRange (AsP _ n p)       = killRangeN (AsP noRange) n p
+  killRange (DotP _ e)        = killRangeN (DotP noRange) e
+  killRange (LitP _ l)        = killRangeN (LitP noRange) l
   killRange (QuoteP _)        = QuoteP noRange
-  killRange (RecP _ fs)       = killRange1 (RecP noRange) fs
-  killRange (EqualP _ es)     = killRange1 (EqualP noRange) es
-  killRange (EllipsisP _ mp)  = killRange1 (EllipsisP noRange) mp
-  killRange (WithP _ p)       = killRange1 (WithP noRange) p
+  killRange (RecP _ fs)       = killRangeN (RecP noRange) fs
+  killRange (EqualP _ es)     = killRangeN (EqualP noRange) es
+  killRange (EllipsisP _ mp)  = killRangeN (EllipsisP noRange) mp
+  killRange (WithP _ p)       = killRangeN (WithP noRange) p
 
 instance KillRange Pragma where
   killRange (OptionsPragma _ s)               = OptionsPragma noRange s
-  killRange (BuiltinPragma _ s e)             = killRange1 (BuiltinPragma noRange s) e
-  killRange (RewritePragma _ _ qs)            = killRange1 (RewritePragma noRange noRange) qs
-  killRange (StaticPragma _ q)                = killRange1 (StaticPragma noRange) q
-  killRange (InjectivePragma _ q)             = killRange1 (InjectivePragma noRange) q
-  killRange (InlinePragma _ b q)              = killRange1 (InlinePragma noRange b) q
-  killRange (CompilePragma _ b q s)           = killRange1 (\ q -> CompilePragma noRange b q s) q
+  killRange (BuiltinPragma _ s e)             = killRangeN (BuiltinPragma noRange s) e
+  killRange (RewritePragma _ _ qs)            = killRangeN (RewritePragma noRange noRange) qs
+  killRange (StaticPragma _ q)                = killRangeN (StaticPragma noRange) q
+  killRange (InjectivePragma _ q)             = killRangeN (InjectivePragma noRange) q
+  killRange (InlinePragma _ b q)              = killRangeN (InlinePragma noRange b) q
+  killRange (CompilePragma _ b q s)           = killRangeN (\ q -> CompilePragma noRange b q s) q
   killRange (ForeignPragma _ b s)             = ForeignPragma noRange b s
   killRange (ImpossiblePragma _ strs)         = ImpossiblePragma noRange strs
   killRange (TerminationCheckPragma _ t)      = TerminationCheckPragma noRange (killRange t)
@@ -1142,25 +1168,26 @@ instance KillRange Pragma where
   killRange (WarningOnUsage _ nm str)         = WarningOnUsage noRange (killRange nm) str
   killRange (WarningOnImport _ str)           = WarningOnImport noRange str
   killRange (CatchallPragma _)                = CatchallPragma noRange
-  killRange (DisplayPragma _ lhs rhs)         = killRange2 (DisplayPragma noRange) lhs rhs
-  killRange (EtaPragma _ q)                   = killRange1 (EtaPragma noRange) q
+  killRange (DisplayPragma _ lhs rhs)         = killRangeN (DisplayPragma noRange) lhs rhs
+  killRange (EtaPragma _ q)                   = killRangeN (EtaPragma noRange) q
   killRange (NoPositivityCheckPragma _)       = NoPositivityCheckPragma noRange
-  killRange (PolarityPragma _ q occs)         = killRange1 (\q -> PolarityPragma noRange q occs) q
+  killRange (PolarityPragma _ q occs)         = killRangeN (\q -> PolarityPragma noRange q occs) q
   killRange (NoUniverseCheckPragma _)         = NoUniverseCheckPragma noRange
   killRange (NotProjectionLikePragma _ q)     = NotProjectionLikePragma noRange q
 
 instance KillRange RHS where
   killRange AbsurdRHS = AbsurdRHS
-  killRange (RHS e)   = killRange1 RHS e
+  killRange (RHS e)   = killRangeN RHS e
 
 instance KillRange TypedBinding where
-  killRange (TBind _ b e) = killRange2 (TBind noRange) b e
-  killRange (TLet r ds)   = killRange2 TLet r ds
+  killRange (TBind _ b e) = killRangeN (TBind noRange) b e
+  killRange (TLet r ds)   = killRangeN TLet r ds
 
 instance KillRange WhereClause where
-  killRange NoWhere             = NoWhere
-  killRange (AnyWhere r d)      = killRange1 (AnyWhere noRange) d
-  killRange (SomeWhere r n a d) = killRange3 (SomeWhere noRange) n a d
+  killRange NoWhere               = NoWhere
+  killRange (AnyWhere r d)        = killRangeN (AnyWhere noRange) d
+  killRange (SomeWhere r e n a d) =
+    killRangeN (SomeWhere noRange) e n a d
 
 ------------------------------------------------------------------------
 -- NFData instances
@@ -1205,7 +1232,7 @@ instance NFData Expr where
 -- | Ranges are not forced.
 
 instance NFData Pattern where
-  rnf (IdentP a)       = rnf a
+  rnf (IdentP a b)     = rnf a `seq` rnf b
   rnf (QuoteP _)       = ()
   rnf (AppP a b)       = rnf a `seq` rnf b
   rnf (RawAppP _ a)    = rnf a
@@ -1237,12 +1264,13 @@ instance NFData Declaration where
   rnf (Generalize _ a)        = rnf a
   rnf (Field _ fs)            = rnf fs
   rnf (FunClause a b c d)     = rnf a `seq` rnf b `seq` rnf c `seq` rnf d
-  rnf (DataSig _ a b c)       = rnf a `seq` rnf b `seq` rnf c
-  rnf (Data _ a b c d)        = rnf a `seq` rnf b `seq` rnf c `seq` rnf d
+  rnf (DataSig _ a b c d)     = rnf a `seq` rnf b `seq` rnf c `seq` rnf d
+  rnf (Data _ a b c d e)      = rnf a `seq` rnf b `seq` rnf c `seq` rnf d
+                                      `seq` rnf e
   rnf (DataDef _ a b c)       = rnf a `seq` rnf b `seq` rnf c
-  rnf (RecordSig _ a b c)     = rnf a `seq` rnf b `seq` rnf c
+  rnf (RecordSig _ a b c d)   = rnf a `seq` rnf b `seq` rnf c `seq` rnf d
   rnf (RecordDef _ a b c d)   = rnf (a, b, c, d)
-  rnf (Record _ a b c d e)    = rnf (a, b, c, d, e)
+  rnf (Record _ a b c d e f)  = rnf (a, b, c, d, e, f)
   rnf (RecordDirective a)     = rnf a
   rnf (Infix a b)             = rnf a `seq` rnf b
   rnf (Syntax a b)            = rnf a `seq` rnf b
@@ -1258,12 +1286,15 @@ instance NFData Declaration where
   rnf (Primitive _ a)         = rnf a
   rnf (Open _ a b)            = rnf a `seq` rnf b
   rnf (Import _ a b _ c)      = rnf a `seq` rnf b `seq` rnf c
-  rnf (ModuleMacro _ a b _ c) = rnf a `seq` rnf b `seq` rnf c
-  rnf (Module _ a b c)        = rnf a `seq` rnf b `seq` rnf c
+  rnf (ModuleMacro _ a b c _ d)
+                              = rnf a `seq` rnf b `seq` rnf c `seq` rnf d
+  rnf (Module _ a b c d)      = rnf a `seq` rnf b `seq` rnf c `seq` rnf d
   rnf (UnquoteDecl _ a b)     = rnf a `seq` rnf b
   rnf (UnquoteDef _ a b)      = rnf a `seq` rnf b
   rnf (UnquoteData _ a b c)   = rnf a `seq` rnf b `seq` rnf c
   rnf (Pragma a)              = rnf a
+  rnf (Opaque r xs)           = rnf r `seq` rnf xs
+  rnf (Unfolding r xs)        = rnf r `seq` rnf xs
 
 instance NFData OpenShortHand
 
@@ -1326,9 +1357,9 @@ instance NFData ModuleAssignment where
   rnf (ModuleAssignment a b c) = rnf a `seq` rnf b `seq` rnf c
 
 instance NFData a => NFData (WhereClause' a) where
-  rnf NoWhere             = ()
-  rnf (AnyWhere _ a)      = rnf a
-  rnf (SomeWhere _ a b c) = rnf a `seq` rnf b `seq` rnf c
+  rnf NoWhere               = ()
+  rnf (AnyWhere _ a)        = rnf a
+  rnf (SomeWhere _ a b c d) = rnf a `seq` rnf b `seq` rnf c `seq` rnf d
 
 instance NFData LamClause where
   rnf (LamClause a b c) = rnf (a, b, c)

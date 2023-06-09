@@ -27,6 +27,7 @@ module Agda.Interaction.Library
   , getAgdaLibFiles'
   , getPrimitiveLibDir
   , LibName
+  , OptionsPragma(..)
   , AgdaLibFile(..)
   , ExeName
   , LibM
@@ -50,7 +51,7 @@ import Control.Monad.IO.Class ( MonadIO(..) )
 
 import Data.Char
 import Data.Either
-import Data.Function
+import Data.Function (on)
 import Data.Map ( Map )
 import qualified Data.Map as Map
 import Data.Maybe ( catMaybes, fromMaybe )
@@ -71,6 +72,7 @@ import Agda.Utils.FileName
 import Agda.Utils.Functor ( (<&>) )
 import Agda.Utils.IO ( catchIO )
 import qualified Agda.Utils.IO.UTF8 as UTF8
+import Agda.Utils.Lens
 import Agda.Utils.List
 import Agda.Utils.List1             ( List1, pattern (:|) )
 import Agda.Utils.List2             ( List2 )
@@ -195,11 +197,17 @@ findProjectConfig' root = do
         []     -> liftIO (upPath root) >>= \case
           Just up -> do
             conf <- findProjectConfig' up
+            conf <- return $ case conf of
+                  DefaultProjectConfig{} -> conf
+                  ProjectConfig{..}      ->
+                    ProjectConfig{ configAbove = configAbove + 1
+                                 , ..
+                                 }
             storeCachedProjectConfig root conf
             return conf
           Nothing -> return DefaultProjectConfig
         files -> do
-          let conf = ProjectConfig root files
+          let conf = ProjectConfig root files 0
           storeCachedProjectConfig root conf
           return conf
 
@@ -227,15 +235,17 @@ findProjectConfig' root = do
 
 findProjectRoot :: FilePath -> LibM (Maybe FilePath)
 findProjectRoot root = findProjectConfig root <&> \case
-  ProjectConfig p _    -> Just p
+  ProjectConfig p _ _  -> Just p
   DefaultProjectConfig -> Nothing
 
 
 -- | Get the contents of @.agda-lib@ files in the given project root.
 getAgdaLibFiles' :: FilePath -> LibErrorIO [AgdaLibFile]
 getAgdaLibFiles' path = findProjectConfig' path >>= \case
-  DefaultProjectConfig    -> return []
-  ProjectConfig root libs -> parseLibFiles Nothing $ map ((0,) . (root </>)) libs
+  DefaultProjectConfig          -> return []
+  ProjectConfig root libs above ->
+    map (set libAbove above) <$>
+    parseLibFiles Nothing (map ((0,) . (root </>)) libs)
 
 -- | Get dependencies and include paths for given project root:
 --

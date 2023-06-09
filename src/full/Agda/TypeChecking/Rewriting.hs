@@ -68,7 +68,6 @@ import Agda.TypeChecking.Free
 import Agda.TypeChecking.Conversion
 import qualified Agda.TypeChecking.Positivity.Occurrence as Pos
 import Agda.TypeChecking.Pretty
-import Agda.TypeChecking.Primitive ( getBuiltinName )
 import Agda.TypeChecking.Reduce
 import Agda.TypeChecking.Substitute
 import Agda.TypeChecking.Telescope
@@ -288,7 +287,7 @@ checkRewriteRule q = do
         checkNoLhsReduction f hd es
 
         ps <- catchPatternErr failureBlocked $
-          patternFrom Relevant 0 (t , Def f []) es
+          patternFrom Relevant 0 (t , Def f) es
 
         reportSDoc "rewriting" 30 $
           "Pattern generated from lhs: " <+> prettyTCM (PDef f ps)

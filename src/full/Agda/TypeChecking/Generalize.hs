@@ -20,6 +20,8 @@ import Data.List (partition, sortBy)
 import Data.Monoid
 import Data.Function (on)
 
+import Agda.Interaction.Options.Base
+
 import Agda.Syntax.Common
 import Agda.Syntax.Concrete.Name (LensInScope(..))
 import Agda.Syntax.Position
@@ -32,7 +34,6 @@ import Agda.TypeChecking.Monad
 import Agda.TypeChecking.Constraints
 import Agda.TypeChecking.Conversion
 import Agda.TypeChecking.Free
-import Agda.TypeChecking.Irrelevance
 import Agda.TypeChecking.InstanceArguments (postponeInstanceConstraints)
 import Agda.TypeChecking.MetaVars
 import Agda.TypeChecking.Pretty
@@ -53,7 +54,7 @@ import Agda.Utils.Monad
 import Agda.Utils.Null
 import Agda.Utils.Size
 import Agda.Utils.Permutation
-import Agda.Utils.Pretty (prettyShow)
+import Agda.Utils.Pretty (prettyShow, singPlural)
 import Agda.Utils.Tuple
 
 -- | Generalize a telescope over a set of generalizable variables.
@@ -99,7 +100,7 @@ generalizeTelescope vars typecheckAction ret = billTo [Typing, Generalize] $ wit
   --   Γ (r : R) Θ ⊢ letbinds
   --   Γ Δ Θρ      ⊢ letbinds' = letbinds(lift |Θ| ρ)
   letbinds' <- applySubst (liftS (size tel) sub) <$> instantiateFull letbinds
-  let addLet (x, (v, dom)) = addLetBinding' x v dom
+  let addLet (x, LetBinding o v dom) = addLetBinding' o x v dom
 
   updateContext sub ((genTelCxt ++) . drop 1) $
     updateContext (raiseS (size tel')) (newTelCxt ++) $
@@ -376,8 +377,7 @@ pruneUnsolvedMetas genRecName genRecCon genTel genRecFields interactionPoints is
     prune cxt tel (x : xs) | not (isGeneralized x) = do
       -- If x is a blocked term we shouldn't instantiate it.
       whenM (not <$> isBlockedTerm x) $ do
-        x <- if size tel > 0 then prePrune x
-                             else return x
+        x <- if null tel then return x else prePrune x
         pruneMeta (telFromList $ reverse cxt) x
       prune cxt tel xs
     prune cxt (ExtendTel a tel) (x : xs) = prune (fmap (x,) a : cxt) (unAbs tel) xs
@@ -658,11 +658,11 @@ pruneUnsolvedMetas genRecName genRecCon genTel genRecFields interactionPoints is
                      "clear, but simply mentioning the variables in the right order should also work."
           order = sep [ fwords "Dependency analysis suggested this (likely incorrect) order:",
                         nest 2 $ fwords (unwords names) ]
-          guess = "After constraint solving it looks like " ++ commas late ++ " actually depend" ++ s ++
-                  " on " ++ commas early
-            where
-              s | length late == 1 = "s"
-                | otherwise        = ""
+          guess = unwords
+            [ "After constraint solving it looks like", commas late
+            , singPlural late (++ "s") id "actually depend"
+            , "on", commas early
+            ]
       genericDocError =<< vcat
         [ fwords $ "Variable generalization failed."
         , nest 2 $ sep ["- Probable cause", nest 4 $ fwords cause]
@@ -756,7 +756,7 @@ createGenValue x = setCurrentRange x $ do
   -- instantiated, and set the quantity of the meta to the declared
   -- quantity of the generalisable variable.
   updateMetaVar m $ \ mv ->
-    setQuantity (getQuantity (defArgInfo def)) $
+    setModality (getModality (defArgInfo def)) $
     mv { mvFrozen = Frozen }
 
   -- Set up names of arg metas
@@ -801,6 +801,7 @@ createGenRecordType genRecMeta@(El genRecSort _) sortedMetas = do
                   , conFields    = map argFromDom genRecFields
                   }
   projIx <- succ . size <$> getContext
+  erasure <- optErasure <$> pragmaOptions
   inTopContext $ forM_ (zip sortedMetas genRecFields) $ \ (meta, fld) -> do
     fieldTy <- getMetaType meta
     let field = unDom fld
@@ -819,12 +820,14 @@ createGenRecordType genRecMeta@(El genRecSort _) sortedMetas = do
                , funAbstr        = ConcreteDef
                , funDelayed      = NotDelayed
                , funProjection   = Right proj
+               , funErasure      = erasure
                , funFlags        = Set.empty
                , funTerminates   = Just True
                , funExtLam       = Nothing
                , funWith         = Nothing
                , funCovering     = []
                , funIsKanOp      = Nothing
+               , funOpaque       = TransparentDef
                }
   addConstant' (conName genRecCon) defaultArgInfo (conName genRecCon) __DUMMY_TYPE__ $ -- Filled in later
     Constructor { conPars   = 0
@@ -832,11 +835,11 @@ createGenRecordType genRecMeta@(El genRecSort _) sortedMetas = do
                 , conSrcCon = genRecCon
                 , conData   = genRecName
                 , conAbstr  = ConcreteDef
-                , conInd    = Inductive
                 , conComp   = emptyCompKit
                 , conProj   = Nothing
                 , conForced = []
                 , conErased = Nothing
+                , conErasure = erasure
                 }
   let dummyTel 0 = EmptyTel
       dummyTel n = ExtendTel (defaultDom __DUMMY_TYPE__) $ Abs "_" $ dummyTel (n - 1)

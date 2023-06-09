@@ -66,7 +66,7 @@ requireCubical
   -> TCM ()
 requireCubical wanted s = do
   cubical         <- optCubical <$> pragmaOptions
-  inErasedContext <- hasQuantity0 <$> getEnv
+  inErasedContext <- hasQuantity0 <$> viewTC eQuantity
   case cubical of
     Just CFull -> return ()
     Just CErased | wanted == CErased || inErasedContext -> return ()
@@ -222,8 +222,8 @@ data Command = DoTransp | DoHComp
 
 -- | The built-in name associated with a particular Kan operation.
 kanOpName :: KanOperation -> String
-kanOpName TranspOp{} = builtinTrans
-kanOpName HCompOp{}  = builtinHComp
+kanOpName TranspOp{} = getBuiltinId PrimTrans
+kanOpName HCompOp{}  = getBuiltinId PrimHComp
 
 -- | Our Kan operations are @transp@ and @hcomp@. The KanOperation
 -- record stores the data associated with a Kan operation on arbitrary
