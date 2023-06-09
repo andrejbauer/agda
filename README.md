@@ -1,5 +1,9 @@
-Agda 2
+Agda 2 - S-expression extractor
 ======
+
+**Note:** This branch of Agda has a backend that extracts the internal representation of files as s-expressions.
+Run `agda --help` and have a look at the `--sexp` command-line option to see how it is used.
+
 
 [![Hackage version](https://img.shields.io/hackage/v/Agda.svg?label=Hackage)](http://hackage.haskell.org/package/Agda)
 [![Stackage version](https://www.stackage.org/package/Agda/badge/lts?label=Stackage)](https://www.stackage.org/package/Agda)
