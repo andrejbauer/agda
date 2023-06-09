@@ -16,8 +16,17 @@ toText :: Sexp -> T.Text
 toText (Atom x)   = x
 toText (Integer k) = T.pack $ show k
 toText (Double x) = T.pack $ show x
-toText (String s) = T.pack $ show s
+toText (String s) = '"' `T.cons` (T.pack $ escape s) `T.snoc` '"' --
+  where
+    -- We escape characters with bare hands to keep UTF8 intact
+    escape :: String -> String
+    escape [] = []
+    escape ('"' : s) = '\\' : '"' : escape s
+    escape ('\\' : s) = '\\' : '\\' : escape s
+    escape (c : s) = c : escape s
+
 toText (Cons lst) = '(' `T.cons` (T.intercalate (T.singleton ' ') (map toText lst)) `T.snoc` ')'
+
 
 class Sexpable a where
     toSexp :: a -> Sexp
