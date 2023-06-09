@@ -134,14 +134,17 @@ modToFile m ext = Network.URI.Encode.encode $ render (pretty m) <.> ext
 -- | Conversion to S-expressions
 
 instance Sexpable Name where
-    toSexp n = Atom (T.pack $ prettyShow $ nameConcrete n)
+    toSexp n = String (prettyShow $ nameConcrete n)
+
+namesToString :: [Name] -> String
+namesToString lst =
+  List.intercalate "." $ map (prettyShow . nameConcrete) lst
 
 instance Sexpable ModuleName where
-    toSexp (MName lst) = constr "module-name" $ map toSexp lst
+    toSexp (MName lst) = constr "module-name" [toSexp $ namesToString lst]
 
 instance Sexpable QName where
-    toSexp (QName (MName lst) nam) = constr "name" $ ((mkId $ nameId nam) ++ map toSexp lst ++ [toSexp nam])
-        where mkId (NameId i (ModuleNameHash m)) = [toSexp m, toSexp i]
+    toSexp (QName (MName lst) nam) = constr "name" [toSexp $ namesToString $ lst ++ [nam]]
 
 instance Sexpable Suffix where
     toSexp NoSuffix = Atom "none"
@@ -228,10 +231,10 @@ instance Sexpable AI.Sort where
         sexpify (AI.DummyS s) = constr "sort-dummy" [toSexp s]
 
 instance Sexpable TCM.Definition where
-    toSexp d = constr "definition" [ toSexp (TCM.defName d),
-                                     toSexp (TCM.defType d),
-                                     toSexp (TCM.theDef d)
-                                    ]
+    toSexp d = constr "entry" [ toSexp (TCM.defName d),
+                                toSexp (TCM.defType d),
+                                toSexp (TCM.theDef d)
+                              ]
 instance Sexpable TCM.Defn where
     toSexp (TCM.Axiom {}) = constr "axiom" []
     toSexp (TCM.DataOrRecSig {}) = constr "data-or-record" []
@@ -280,4 +283,4 @@ instance Sexpable AI.Telescope where
               telescopeToList (AI.ExtendTel t (NoAbs n tel)) = (constr "anonymous" [toSexp n, toSexp t]) : telescopeToList tel
 
 instance Sexpable TopLevelModuleName where
-    toSexp (TopLevelModuleName rng (ModuleNameHash id) ps) = constr "module-name" (toSexp id : (map (Atom . T.fromStrict) $ toList ps))
+    toSexp (TopLevelModuleName _ _ ps) = constr "module-name" [toSexp $ T.intercalate (T.singleton '.') $ map T.fromStrict $ toList ps]
