@@ -137,7 +137,7 @@ instance Sexpable Name where
     toSexp n = String (prettyShow $ nameConcrete n)
 
 namesToString :: [Name] -> Name -> String
-namesToString [] nm = prettyShow (nameConcrete nm) ++ ' ' : toString (nameId nm)
+namesToString [] nm = prettyShow (nameConcrete nm) ++ ' ' : show (nameId nm)
 namesToString (m : ms) nm = prettyShow (nameConcrete m) ++ '.' : namesToString ms nm
 
 instance Sexpable ModuleName where
