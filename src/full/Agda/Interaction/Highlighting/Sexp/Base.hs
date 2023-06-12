@@ -136,15 +136,15 @@ modToFile m ext = Network.URI.Encode.encode $ render (pretty m) <.> ext
 instance Sexpable Name where
     toSexp n = String (prettyShow $ nameConcrete n)
 
-namesToString :: [Name] -> String
-namesToString lst =
-  List.intercalate "." $ map (prettyShow . nameConcrete) lst
+namesToString :: [Name] -> Name -> String
+namesToString [] nm = prettyShow (nameConcrete nm) ++ ' ' : toString (nameId nm)
+namesToString (m : ms) nm = prettyShow (nameConcrete m) ++ '.' : namesToString ms nm
 
 instance Sexpable ModuleName where
     toSexp (MName lst) = constr "module-name" [toSexp $ namesToString lst]
 
 instance Sexpable QName where
-    toSexp (QName (MName lst) nam) = constr "name" [toSexp $ namesToString $ lst ++ [nam]]
+    toSexp (QName (MName lst) nam) = constr "name" [toSexp $ namesToString lst nam]
 
 instance Sexpable Suffix where
     toSexp NoSuffix = Atom "none"
