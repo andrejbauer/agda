@@ -914,7 +914,7 @@ library
       Agda.Utils.CallStack.Base
       Agda.Utils.CallStack.Pretty
 
-      if flag(optimise-heavily)
+  if flag(optimise-heavily)
     ghc-options: -fexpose-all-unfoldings
                  -fspecialise-aggressively
 
