@@ -4,7 +4,7 @@ cabal-version:   1.24
 build-type:      Custom
 license:         OtherLicense
 license-file:    LICENSE
-copyright:       (c) 2005-2023 The Agda Team.
+copyright:       (c) 2005-2022 The Agda Team.
 author:          Ulf Norell and The Agda Team, see https://agda.readthedocs.io/en/latest/team.html
 maintainer:      The Agda Team
 homepage:        http://wiki.portal.chalmers.se/agda/
@@ -91,7 +91,7 @@ extra-source-files: CHANGELOG.md
                     stack-8.10.7.yaml
                     stack-9.0.2.yaml
                     stack-9.2.5.yaml
-                    stack-9.4.4.yaml
+                    stack-9.4.3.yaml
 
 data-dir:           src/data
 data-files:         emacs-mode/*.el
@@ -343,7 +343,6 @@ library
                     Agda.Interaction.Highlighting.FromAbstract
                     Agda.Interaction.Highlighting.Generate
                     Agda.Interaction.Highlighting.HTML
-                    Agda.Interaction.Highlighting.Sexp
                     Agda.Interaction.Highlighting.JSON
                     Agda.Interaction.Highlighting.Precise
                     Agda.Interaction.Highlighting.Range
@@ -648,9 +647,6 @@ library
                     Agda.Interaction.Highlighting.Dot.Base
                     Agda.Interaction.Highlighting.HTML.Backend
                     Agda.Interaction.Highlighting.HTML.Base
-                    Agda.Interaction.Highlighting.Sexp.Backend
-                    Agda.Interaction.Highlighting.Sexp.Base
-                    Agda.Interaction.Highlighting.Sexp.Sexp
                     Agda.Interaction.Highlighting.LaTeX.Backend
                     Agda.Interaction.Highlighting.LaTeX.Base
                     Agda.Interaction.Options.Base
