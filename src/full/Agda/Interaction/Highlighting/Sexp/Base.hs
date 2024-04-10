@@ -162,6 +162,7 @@ instance Sexpable Origin where
     toSexp Reflected = constr "reflected" []
     toSexp CaseSplit = constr "case-split" []
     toSexp Substitution = constr "substitution" []
+    toSexp ExpandedPun = constr "expanded-pun" []
 
 instance Sexpable ProjOrigin where
     toSexp ProjPrefix = constr "user-written" []
