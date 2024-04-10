@@ -229,6 +229,7 @@ instance Sexpable AI.Sort where
         sexpify (AI.SSet lvl) = constr "sort-sset" [toSexp lvl]
         sexpify AI.SizeUniv = constr "sort-size" []
         sexpify AI.LockUniv = constr "sort-lock" []
+        sexpify AI.LevelUniv = constr "sort-level" []
         sexpify AI.IntervalUniv = constr "sort-interval" []
         sexpify (AI.PiSort (AI.Dom _ _ _ _ t) s a) = constr "sort-pi" [toSexp t, toSexp s, toSexp a]
         sexpify (AI.FunSort t u) = constr "sort-fun" [toSexp t, toSexp u]
