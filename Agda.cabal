@@ -789,6 +789,10 @@ library
       Agda.Interaction.Options.HasOptions
       Agda.Utils.CallStack.Base
       Agda.Utils.CallStack.Pretty
+      Agda.Interaction.Highlighting.Sexp
+      Agda.Interaction.Highlighting.Sexp.Backend
+      Agda.Interaction.Highlighting.Sexp.Base
+      Agda.Interaction.Highlighting.Sexp.Sexp
 
 -- Agda binary
 ---------------------------------------------------------------------------
