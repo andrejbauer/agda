@@ -54,7 +54,7 @@ jobs:
     - if: ${{ runner.os == 'macOS' }}
       name: Set up pkg-config for the ICU library (macOS)
       run: |
-        export PKG_CONFIG_PATH=$(brew --prefix)/opt/icu4c/lib/pkgconfig
+        export PKG_CONFIG_PATH=/usr/local/opt/icu4c/lib/pkgconfig
         echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH}" >> ${GITHUB_ENV}
         # print some information to debug pkg-config
         echo "$ export PKG_CONFIG_PATH=${PKG_CONFIG_PATH}"
@@ -65,7 +65,7 @@ jobs:
     - name: Configure the build plan
       run: |
         cabal update
-        cabal configure ${FLAGS} -O0 ${{ matrix.cabal-flags }}
+        cabal configure ${FLAGS} -O0
     - id: cache
       name: Cache dependencies
       uses: actions/cache@v3
@@ -91,25 +91,25 @@ jobs:
         cabal-ver:
         - '3.8'
         ghc-ver:
-        - 9.4.4
+        - 9.4.3
         - 9.2.5
         - 9.0.2
         - 8.10.7
         - 8.8.4
         - 8.6.5
         - 8.4.4
-        - 8.2.2
-        - 8.0.2
         include:
-        - cabal-flags: -c 'mtl >= 2.3.1'
-          cabal-ver: '3.8'
-          ghc-ver: 9.4.4
-          os: ubuntu-22.04
         - cabal-ver: '3.8'
-          ghc-ver: 9.4.4
+          ghc-ver: 8.0.2
+          os: ubuntu-20.04
+        - cabal-ver: '3.8'
+          ghc-ver: 8.2.2
+          os: ubuntu-20.04
+        - cabal-ver: '3.8'
+          ghc-ver: 9.4.3
           os: macos-12
         - cabal-ver: '3.8'
-          ghc-ver: 9.4.4
+          ghc-ver: 9.4.2
           os: windows-2022
         os:
         - ubuntu-22.04
