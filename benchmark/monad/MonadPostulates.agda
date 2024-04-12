@@ -53,10 +53,10 @@ open STOProps (record { Carrier = _ ; _≈_ = _; _<_ = _
                       ; isStrictTotalOrder = posOrdered })
 
 import IndexedMap as Map -- renaming (Map to MemoTable)
-open import Category.Monad
-open import Category.Monad.State
+open import Effect.Monad
+open import Effect.Monad.State
 import Data.List as List; open List using (List)
-open import Data.Unit hiding (poset; _≤_)
+open import Data.Unit
 open import Function
 open import Data.Maybe
 open import Data.Product.Relation.Binary.Lex.Strict
