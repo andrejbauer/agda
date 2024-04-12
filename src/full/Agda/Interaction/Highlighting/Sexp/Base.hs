@@ -70,6 +70,7 @@ dumpFileExt ft =
     RstFileType  -> "rst-sexp"
     TexFileType  -> "tex-sexp"
     OrgFileType  -> "org-sexp"
+    TypstFileType  -> "typst-sexp"
 
 -- | Options for AST dump
 
