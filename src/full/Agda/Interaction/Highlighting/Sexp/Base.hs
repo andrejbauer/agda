@@ -243,6 +243,24 @@ instance Sexpable TCM.Definition where
                                 toSexp (TCM.defType d),
                                 toSexp (TCM.theDef d)
                               ]
+
+instance Sexpable AI.Univ where
+    toSexp (AI.UProp) = constr "univ-uprop" []
+    toSexp (AI.UType) = constr "univ-utype" []
+    toSexp (AI.USSet) = constr "univ-usset" []
+
+instance Sexpable TCM.BuiltinSort where
+    toSexp (TCM.SortUniv u) = constr "builtin-sort-univ" [toSexp u]
+    toSexp (TCM.SortOmega u) = constr "builtin-sort-omega" [toSexp u]
+    toSexp (TCM.SortIntervalUniv) = constr "builtin-sort-interval-univ" []
+    toSexp (TCM.SortLevelUniv) = constr "builtin-sort-level-univ" []
+
+--instance Sexpable TCM.BuiltinSort where
+--    toSexp d = constr "builtin-sort" []
+
+instance Sexpable TCM.PrimitiveId where
+    toSexp d = constr "prim-id" []
+
 instance Sexpable TCM.Defn where
     toSexp (TCM.Axiom {}) = constr "axiom" []
     toSexp (TCM.DataOrRecSig {}) = constr "data-or-record" []
