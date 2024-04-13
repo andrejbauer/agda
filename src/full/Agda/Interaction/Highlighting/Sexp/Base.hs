@@ -43,6 +43,8 @@ import Agda.Syntax.TopLevelModuleName
 import Agda.Syntax.Literal (Literal(..))
 
 import Agda.Syntax.Common
+import Agda.Syntax.Internal.Univ
+import Agda.Syntax.Builtin
 import Agda.Syntax.Abstract as AS
 import Agda.Syntax.Internal as AI
 import Agda.Syntax.Internal.Elim as EL
@@ -58,7 +60,7 @@ import Agda.TypeChecking.Monad as TCM
 
 import Agda.Utils.Function
 import qualified Agda.Utils.IO.UTF8 as UTF8
-import Agda.Syntax.Common.Pretty
+import Agda.Utils.Pretty
 
 import Agda.Utils.Impossible
 
@@ -70,7 +72,6 @@ dumpFileExt ft =
     RstFileType  -> "rst-sexp"
     TexFileType  -> "tex-sexp"
     OrgFileType  -> "org-sexp"
-    TypstFileType  -> "typst-sexp"
 
 -- | Options for AST dump
 
@@ -146,7 +147,6 @@ modulesToString [] = ""
 modulesToString [nm] = prettyShow (nameConcrete nm) ++ ' ' : show h where NameId h _ = nameId nm
 modulesToString (m : ms) = prettyShow (nameConcrete m) ++ '.' : modulesToString ms
 
-
 instance Sexpable ModuleName where
     toSexp (MName lst) = constr "module-name" [toSexp $ modulesToString lst]
 
@@ -164,7 +164,6 @@ instance Sexpable Origin where
     toSexp CaseSplit = constr "case-split" []
     toSexp Substitution = constr "substitution" []
     toSexp ExpandedPun = constr "expanded-pun" []
-    toSexp Generalization = constr "generalization" []
 
 instance Sexpable ProjOrigin where
     toSexp ProjPrefix = constr "user-written" []
@@ -223,22 +222,18 @@ instance Sexpable t => Sexpable (AI.PlusLevel' t) where
     toSexp (AI.Plus k t) = constr "plus" [toSexp k, toSexp t]
 
 instance Sexpable AI.Sort where
-    toSexp s = constr "sort" [sexpify s]
-      where
-        sexpify (AI.Type lvl) = constr "sort-set" [toSexp lvl]
-        sexpify (AI.Prop lvl) = constr "sort-prop" [toSexp lvl]
-        sexpify (AI.Inf _ k) = constr "sort-setω" [toSexp k]
-        sexpify (AI.SSet lvl) = constr "sort-sset" [toSexp lvl]
-        sexpify AI.SizeUniv = constr "sort-size" []
-        sexpify AI.LockUniv = constr "sort-lock" []
-        sexpify AI.LevelUniv = constr "sort-level" []
-        sexpify AI.IntervalUniv = constr "sort-interval" []
-        sexpify (AI.PiSort (AI.Dom _ _ _ _ t) s a) = constr "sort-pi" [toSexp t, toSexp s, toSexp a]
-        sexpify (AI.FunSort t u) = constr "sort-fun" [toSexp t, toSexp u]
-        sexpify (AI.UnivSort srt) = constr "sort-univ" [toSexp srt]
-        sexpify (AI.MetaS mid es) = constr "sort-meta" (toSexp mid : map toSexp es)
-        sexpify (AI.DefS q es) = constr "sort-def" (toSexp q : map toSexp es)
-        sexpify (AI.DummyS s) = constr "sort-dummy" [toSexp s]
+  toSexp (Univ u lvl) = constr "sort-univ" [toSexp u, toSexp lvl]
+  toSexp (Inf u k) = constr "sort-ω" [toSexp u, toSexp k]
+  toSexp SizeUniv = constr "sort-size" []
+  toSexp LockUniv = constr "sort-lock" []
+  toSexp LevelUniv = constr "sort-level" []
+  toSexp AI.IntervalUniv = constr "sort-interval" []
+  toSexp (PiSort (AI.Dom _ _ _ _ t) s a) = constr "sort-pi" [toSexp t, toSexp s, toSexp a]
+  toSexp (FunSort t u) = constr "sort-fun" [toSexp t, toSexp u]
+  toSexp (UnivSort srt) = constr "sort-univ" [toSexp srt]
+  toSexp (MetaS mid es) = constr "sort-meta" (toSexp mid : map toSexp es)
+  toSexp (DefS q es) = constr "sort-def" (toSexp q : map toSexp es)
+  toSexp (DummyS s) = constr "sort-dummy" [toSexp s]
 
 instance Sexpable TCM.Definition where
     toSexp d = constr "entry" [ toSexp (TCM.defName d),
@@ -246,22 +241,19 @@ instance Sexpable TCM.Definition where
                                 toSexp (TCM.theDef d)
                               ]
 
-instance Sexpable AI.Univ where
-    toSexp (AI.UProp) = constr "univ-uprop" []
-    toSexp (AI.UType) = constr "univ-utype" []
-    toSexp (AI.USSet) = constr "univ-usset" []
+instance Sexpable Agda.Syntax.Builtin.PrimitiveId where
+  toSexp i = String (show i)
+
+instance Sexpable Agda.Syntax.Internal.Univ.Univ where
+  toSexp UProp = constr "uprop" []
+  toSexp UType = constr "utype" []
+  toSexp USSet = constr "usset" []
 
 instance Sexpable TCM.BuiltinSort where
-    toSexp (TCM.SortUniv u) = constr "builtin-sort-univ" [toSexp u]
-    toSexp (TCM.SortOmega u) = constr "builtin-sort-omega" [toSexp u]
-    toSexp (TCM.SortIntervalUniv) = constr "builtin-sort-interval-univ" []
-    toSexp (TCM.SortLevelUniv) = constr "builtin-sort-level-univ" []
-
---instance Sexpable TCM.BuiltinSort where
---    toSexp d = constr "builtin-sort" []
-
-instance Sexpable TCM.PrimitiveId where
-    toSexp d = constr "prim-id" []
+  toSexp (SortUniv u) = constr "sort-univ" [toSexp u]
+  toSexp (SortOmega u) = constr "sort-omega" [toSexp u]
+  toSexp (SortIntervalUniv) = constr "sort-interval" []
+  toSexp (SortLevelUniv) = constr "sort-level" []
 
 instance Sexpable TCM.Defn where
     toSexp (TCM.Axiom {}) = constr "axiom" []
