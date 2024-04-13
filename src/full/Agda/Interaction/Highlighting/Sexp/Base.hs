@@ -60,7 +60,7 @@ import Agda.TypeChecking.Monad as TCM
 
 import Agda.Utils.Function
 import qualified Agda.Utils.IO.UTF8 as UTF8
-import Agda.Utils.Pretty
+import Agda.Syntax.Common.Pretty
 
 import Agda.Utils.Impossible
 
@@ -72,6 +72,7 @@ dumpFileExt ft =
     RstFileType  -> "rst-sexp"
     TexFileType  -> "tex-sexp"
     OrgFileType  -> "org-sexp"
+    TypstFileType  -> "typst-sexp"
 
 -- | Options for AST dump
 
@@ -164,6 +165,7 @@ instance Sexpable Origin where
     toSexp CaseSplit = constr "case-split" []
     toSexp Substitution = constr "substitution" []
     toSexp ExpandedPun = constr "expanded-pun" []
+    toSexp Generalization = constr "generalization" []
 
 instance Sexpable ProjOrigin where
     toSexp ProjPrefix = constr "user-written" []
