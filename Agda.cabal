@@ -518,6 +518,7 @@ library
       Agda.Interaction.Highlighting.FromAbstract
       Agda.Interaction.Highlighting.Generate
       Agda.Interaction.Highlighting.HTML
+      Agda.Interaction.Highlighting.Sexp
       Agda.Interaction.Highlighting.JSON
       Agda.Interaction.Highlighting.Precise
       Agda.Interaction.Highlighting.Range
@@ -847,6 +848,9 @@ library
       Agda.Interaction.Highlighting.Dot.Base
       Agda.Interaction.Highlighting.HTML.Backend
       Agda.Interaction.Highlighting.HTML.Base
+      Agda.Interaction.Highlighting.Sexp.Backend
+      Agda.Interaction.Highlighting.Sexp.Base
+      Agda.Interaction.Highlighting.Sexp.Sexp
       Agda.Interaction.Highlighting.LaTeX.Backend
       Agda.Interaction.Highlighting.LaTeX.Base
       Agda.Interaction.Options.Base
